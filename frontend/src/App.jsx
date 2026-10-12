@@ -15,11 +15,13 @@ import {
   logout as apiLogout,
   setCandidateStatus,
   streamScreen,
+  screenExpress,
 } from './api';
 import Dashboard from './components/Dashboard';
 import Backdrop from './components/Backdrop';import HistoryView from './components/HistoryView';
 import JobsView from './components/JobsView';
-import JobSetup from './components/JobSetup';
+import JobSetup, { DEFAULT_ROLES } from './components/JobSetup';
+import ExpressResults from './components/ExpressResults';
 import Login from './components/Login';
 import NlpStudio from './components/NlpStudio';
 import RankingView, { CandidateDetail } from './components/RankingView';
@@ -65,10 +67,12 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState('');
-  const [view, setView] = useState('dashboard'); // dashboard | jobs | history | setup | screening | ranking | historyDetail
+  const [view, setView] = useState('dashboard'); // dashboard | jobs | history | setup | screening | ranking | historyDetail | express
   const [job, setJob] = useState(EMPTY_JOB);
   const [files, setFiles] = useState([]);
   const [error, setError] = useState('');
+  const [roles, setRoles] = useState(DEFAULT_ROLES);
+  const [express, setExpress] = useState(null); // {status, total, roles, startedAt, result, error}
   const [activeJobId, setActiveJobId] = useState(null);
 
   const [total, setTotal] = useState(0);
@@ -148,9 +152,54 @@ export default function App() {
 
   async function startScreening() {
     setError('');
+    if (!files.length) { setError('Please upload at least one resume.'); return; }
+
+    // Express dataset mode: a CSV with more than 20 rows is scored against
+    // every job role in one rapid scan (whole dataset, under 45 seconds).
+    const bigCsv = files.find((f) => f._csvInfo && f._csvInfo.rows > 20);
+    if (bigCsv) {
+      const cleanRoles = roles
+        .map((r) => ({
+          title: (r.title || '').trim(),
+          requiredSkills: (r.requiredSkills || '').trim(),
+          minExp: r.minExp,
+        }))
+        .filter((r) => r.title && r.requiredSkills);
+      if (!cleanRoles.length) {
+        setError('Add at least one job role with a title and required skills for the dataset scan.');
+        return;
+      }
+      const payload = cleanRoles.map((r) => ({
+        title: r.title,
+        required_skills: r.requiredSkills.split(',').map((s) => s.trim()).filter(Boolean),
+        min_experience_years: parseFloat(r.minExp) || 0,
+      }));
+      setExpress({
+        status: 'running',
+        total: bigCsv._csvInfo.rows,
+        roles: payload.map((r) => r.title),
+        startedAt: Date.now(),
+        result: null,
+        error: '',
+      });
+      setView('express');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      try {
+        await guard(() => screenExpress(bigCsv, payload, (evt) => {
+          if (evt.type === 'express_done') {
+            setExpress((prev) => ({ ...prev, status: 'done', result: evt }));
+          }
+        }));
+      } catch (e) {
+        if (!e.sessionExpired) {
+          setExpress((prev) => (prev ? { ...prev, status: 'error', error: e.message || 'Express scan failed.' } : prev));
+        }
+      }
+      return;
+    }
+
     if (!job.title.trim()) { setError('Please give the role a job title.'); return; }
     if (!job.jdText.trim()) { setError('Please paste the job description.'); return; }
-    if (!files.length) { setError('Please upload at least one resume.'); return; }
 
     const payload = toJobPayload(job);
     let jobId = activeJobId;
@@ -400,8 +449,12 @@ export default function App() {
             ← Back
           </Button>
           <JobSetup job={job} setJob={setJob} files={files} setFiles={setFiles}
-            onScreen={startScreening} error={error} />
+            onScreen={startScreening} error={error} roles={roles} setRoles={setRoles} />
         </>
+      )}
+
+      {view === 'express' && express && (
+        <ExpressResults express={express} onBack={() => { setExpress(null); setView('setup'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
       )}
 
       {view === 'screening' && (

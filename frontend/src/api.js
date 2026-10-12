@@ -213,6 +213,61 @@ export async function streamScreen(files, job, onEvent, opts = {}) {
   throw new Error('The screening stream ended unexpectedly. Please try again.');
 }
 
+/**
+ * POST /api/screen/express — rapid dataset scan against multiple job roles.
+ * Streams SSE: express_start → express_done (or express_error).
+ * Resolves with the express_done event.
+ */
+export async function screenExpress(file, roles, onEvent) {
+  const form = new FormData();
+  form.append('dataset', file);
+  form.append('roles', JSON.stringify(roles));
+  const headers = {};
+  const tok = getToken();
+  if (tok) headers['Authorization'] = `Bearer ${tok}`;
+  let res;
+  try {
+    res = await fetch(`${requireApiUrl()}/api/screen/express`, { method: 'POST', headers, body: form });
+  } catch {
+    throw new Error('Could not reach the screening service. Please check your connection and try again.');
+  }
+  if (res.status === 401) {
+    setToken(null);
+    const err = new Error('SESSION_EXPIRED');
+    err.sessionExpired = true;
+    throw err;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || 'Express scan failed to start. Please try again.');
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let finished = false;
+  while (!finished) {
+    const { value, done } = await reader.read();
+    finished = done;
+    buf += decoder.decode(value || new Uint8Array(), { stream: !finished });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 2);
+      if (!chunk.startsWith('data:')) continue;
+      let evt;
+      try {
+        evt = JSON.parse(chunk.slice(5).trim());
+      } catch {
+        continue;
+      }
+      onEvent(evt);
+      if (evt.type === 'express_done') return evt;
+      if (evt.type === 'express_error') throw new Error(evt.message || 'Express scan failed.');
+    }
+  }
+  throw new Error('The express stream ended unexpectedly. Please try again.');
+}
+
 export async function setCandidateStatus(resume_id, status, notes = '', reject_reason = '') {
   return apiJson('/api/candidates/status', {
     method: 'POST',

@@ -333,7 +333,8 @@ def _sse(obj: dict) -> str:
 # ----------------------------------------------------------------------------
 
 CSV_TEXT_HINTS = ("resume", "resume_str", "resume_text", "cv", "profile", "text",
-                  "content", "description", "summary", "details", "bio")
+                  "content", "description", "summary", "details", "bio",
+                  "feature")  # "Feature" holds the resume text in the popular Kaggle dataset
 CSV_CATEGORY_HINTS = ("category", "label", "job_category", "class", "target",
                       "domain", "profession")
 CSV_NAME_HINTS = ("name", "candidate", "candidate_name", "applicant", "full_name",
@@ -353,12 +354,12 @@ def _find_col(columns, hints):
     return None
 
 
-def _parse_csv_dataset(filename: str, data: bytes):
+def _parse_csv_dataset(filename: str, data: bytes, cap: int = MAX_BATCH_FILES):
     """Parse an uploaded CSV resume dataset (e.g. from Kaggle).
 
-    Returns (rows, info): rows = [(display_name, resume_text), ...] capped at
-    MAX_BATCH_FILES; info describes column detection + truncation for honesty.
-    Raises HTTPException(400) with a human-readable message when unusable.
+    Returns (rows, info): rows = [(display_name, resume_text, name, ext_id,
+    category), ...] capped at `cap`; info describes column detection +
+    truncation for honesty. Raises HTTPException(400) when unusable.
     """
     text = None
     for enc in ("utf-8-sig", "latin-1"):
@@ -400,6 +401,7 @@ def _parse_csv_dataset(filename: str, data: bytes):
         text_col = best
     cat_col = _find_col(columns, CSV_CATEGORY_HINTS)
     name_col = _find_col(columns, CSV_NAME_HINTS)
+    id_col = next((c for c in columns if _norm_col(c) in ("id", "resumeid", "resume_id")), None)
     if not text_col or not any((r.get(text_col) or "").strip() for r in rows_raw):
         shown = ", ".join(columns[:8])
         raise HTTPException(
@@ -422,10 +424,11 @@ def _parse_csv_dataset(filename: str, data: bytes):
             continue
         name = (r.get(name_col) or "").strip() if name_col else ""
         cat = (r.get(cat_col) or "").strip() if cat_col else ""
+        ext_id = (r.get(id_col) or "").strip() if id_col else ""
         label = name or (f"{cat} · Row {i}" if cat else f"Row {i}")
         label = re.sub(r"[\\/:*?\"<>|]", " ", label).strip()[:60] or f"Row {i}"
-        out.append((f"{label}.csv", t, name or None))
-        if len(out) >= MAX_BATCH_FILES:
+        out.append((f"{label}.csv", t, name or None, ext_id or None, cat or None))
+        if len(out) >= cap:
             break
     if not out:
         raise HTTPException(status_code=400,
@@ -510,7 +513,7 @@ async def screen_stream(
         ext = _check_upload(filename, data)
         if ext == "csv":
             rows, info = _parse_csv_dataset(filename, data)
-            for disp_name, text, name in rows:
+            for disp_name, text, name, _ext_id, _cat in rows:
                 items.append((disp_name, b"", text, name))
             if info["truncated"]:
                 csv_notes.append(
@@ -618,8 +621,91 @@ async def screen_stream(
 
 
 # ----------------------------------------------------------------------------
-# Candidate statuses (human-only — scoring never sets these)
+# Express dataset mode — whole CSV scored against multiple roles in seconds
 # ----------------------------------------------------------------------------
+
+@app.post("/api/screen/express")
+async def screen_express(
+    dataset: UploadFile = File(...),
+    roles: str = Form(...),
+    user: User = Depends(get_current_user),
+):
+    """Rapid scan of a large CSV resume dataset against multiple job roles.
+
+    Form fields: dataset (one CSV file), roles (JSON list of
+    {title, required_skills:[str], min_experience_years}).
+    Streams SSE: express_start → express_done (or express_error).
+    Not persisted to history — a rapid scan, not a deep screening session.
+    """
+    from .express import EXPRESS_MAX_ROWS, run_express
+    try:
+        roles_in = json.loads(roles)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid roles JSON.")
+    if not isinstance(roles_in, list) or not roles_in:
+        raise HTTPException(status_code=400, detail="At least one job role is required.")
+    if len(roles_in) > 8:
+        raise HTTPException(status_code=400, detail="Maximum 8 job roles per scan.")
+    clean_roles = []
+    for r in roles_in:
+        if not isinstance(r, dict):
+            continue
+        req = r.get("required_skills") or []
+        if isinstance(req, str):
+            req = [s.strip() for s in req.replace(";", ",").split(",") if s.strip()]
+        req = [s for s in req if isinstance(s, str) and s.strip()][:40]
+        title = (r.get("title") or "").strip()
+        if not title or not req:
+            continue
+        try:
+            min_exp = float(r.get("min_experience_years") or 0)
+        except (TypeError, ValueError):
+            min_exp = 0.0
+        clean_roles.append({"title": title[:80], "required_skills": req,
+                            "min_experience_years": max(0.0, min_exp)})
+    if not clean_roles:
+        raise HTTPException(status_code=400,
+                            detail="Each role needs a title and at least one required skill.")
+
+    filename = dataset.filename or "dataset.csv"
+    data = await dataset.read()
+    ext = _check_upload(filename, data)
+    if ext != "csv":
+        raise HTTPException(status_code=400,
+                            detail="Express mode needs a CSV dataset file.")
+    rows, info = _parse_csv_dataset(filename, data, cap=EXPRESS_MAX_ROWS)
+    items = [{"ext_id": ext_id or f"row-{i}",
+              "name": name or disp.replace(".csv", ""),
+              "category": cat or "",
+              "text": text}
+             for i, (disp, text, name, ext_id, cat) in enumerate(rows, start=1)]
+
+    async def event_gen():
+        yield _sse({"type": "express_start", "total": len(items),
+                    "roles": [r["title"] for r in clean_roles],
+                    "truncated": info["truncated"], "total_rows": info["total_rows"]})
+        try:
+            import asyncio
+            result = await asyncio.to_thread(
+                run_express,
+                [(it["ext_id"], it["name"], it["category"], it["text"]) for it in items],
+                clean_roles,
+            )
+        except Exception as e:
+            yield _sse({"type": "express_error",
+                        "message": f"Express scan failed: {e}"})
+            return
+        result["dataset"] = {"filename": filename, "total_rows": info["total_rows"],
+                             "scored_rows": len(items),
+                             "truncated": info["truncated"],
+                             "text_column": info["text_column"]}
+        yield _sse({"type": "express_done", **result})
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 @app.post("/api/candidates/status")
 def set_candidate_status(item: CandidateStatusIn, user: User = Depends(get_current_user)):

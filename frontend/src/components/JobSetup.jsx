@@ -13,6 +13,39 @@ function Field({ label, hint, children }) {
   );
 }
 
+export const DEFAULT_ROLES = [
+  { title: 'Data Scientist', requiredSkills: 'python, machine learning, statistics, pandas, scikit-learn, sql, data visualization', minExp: 3 },
+  { title: 'Software Engineer', requiredSkills: 'python, java, javascript, sql, git, apis', minExp: 2 },
+  { title: 'Designer', requiredSkills: 'ui design, ux design, photoshop, illustrator, figma', minExp: 2 },
+  { title: 'HR Manager', requiredSkills: 'recruitment, onboarding, employee relations, hr policies', minExp: 3 },
+  { title: 'Accountant', requiredSkills: 'accounting, tally, taxation, excel, financial reporting', minExp: 2 },
+];
+
+function RoleCard({ role, index, onChange, onRemove, canRemove }) {
+  const set = (k, v) => onChange(index, { ...role, [k]: v });
+  return (
+    <div className="role-card">
+      <div className="role-head">
+        <span className="role-num">Role {index + 1}</span>
+        {canRemove && (
+          <Button type="button" className="btn-ghost btn-sm" onClick={() => onRemove(index)} aria-label={`Remove ${role.title || 'role'}`}>✕</Button>
+        )}
+      </div>
+      <div className="form-row">
+        <Field label="Job title">
+          <input type="text" value={role.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Data Scientist" />
+        </Field>
+        <Field label="Min. experience (yrs)">
+          <input type="number" min="0" step="0.5" value={role.minExp} onChange={(e) => set('minExp', e.target.value)} placeholder="e.g. 2" />
+        </Field>
+      </div>
+      <Field label="Required skills" hint="Comma-separated. Every resume is scored against every role.">
+        <input type="text" value={role.requiredSkills} onChange={(e) => set('requiredSkills', e.target.value)} placeholder="e.g. python, sql, machine learning" />
+      </Field>
+    </div>
+  );
+}
+
 // Sample posting used by the "demo filler". Clearly illustrative — the
 // recruiter uploads their own resumes and can edit every field afterwards.
 const DEMO_JOB = {
@@ -44,7 +77,7 @@ Nice to have:
 /**
  * Step 1 of the recruiter flow: structured job setup + batch resume upload.
  */
-export default function JobSetup({ job, setJob, files, setFiles, onScreen, error }) {
+export default function JobSetup({ job, setJob, files, setFiles, onScreen, error, roles, setRoles }) {
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef(null);
 
@@ -177,6 +210,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
   const totalSlots = files.reduce((n, f) => n + slotsOf(f), 0);
 
   return (
+    <>
     <div className="setup-grid">
       <section className="card rise" style={{ '--d': '0ms' }}>
         <div className="card-eyebrow">Job setup</div>
@@ -281,5 +315,36 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
         <p className="cta-hint">You will watch each resume being analysed, then get a ranked shortlist.</p>
       </section>
     </div>
+    <div className="card rise" style={{ '--d': '160ms', marginTop: 16 }}>
+      <div className="card-eyebrow">Job roles · dataset Express mode</div>
+      <h2>Roles to score against</h2>
+      <p className="hint">
+        Standard screening uses the single role above. When you upload a large CSV dataset
+        (over 20 rows), Express mode scores <strong>every resume against every role below</strong> —
+        the whole dataset in under 45 seconds.
+      </p>
+      <div className="roles-list">
+        {roles.map((role, i) => (
+          <RoleCard
+            key={i}
+            role={role}
+            index={i}
+            canRemove={roles.length > 1}
+            onChange={(idx, next) => setRoles(roles.map((r, j) => (j === idx ? next : r)))}
+            onRemove={(idx) => setRoles(roles.filter((_, j) => j !== idx))}
+          />
+        ))}
+      </div>
+      {roles.length < 8 && (
+        <Button
+          type="button"
+          className="btn-ghost btn-sm"
+          onClick={() => setRoles([...roles, { title: '', requiredSkills: '', minExp: 2 }])}
+        >
+          ＋ Add job role
+        </Button>
+      )}
+    </div>
+    </>
   );
 }
