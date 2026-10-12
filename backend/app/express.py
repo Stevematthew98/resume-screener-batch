@@ -182,13 +182,40 @@ def run_express(rows, roles):
             exp_v = 1.0 if min_exp <= 0 else min(1.0, exps[i] / min_exp)
             edu_v = 1.0  # express roles carry no degree requirements
             score = round(0.50 * skill_v + 0.25 * sim_v + 0.15 * exp_v + 0.10 * edu_v, 4)
+            exp_years = round(float(exps[i]), 1)
             per_role.append({
                 "role": role["title"],
                 "score": score,
                 "band": _band_for(score),
                 "matched": matched,
                 "missing": missing,
-                "exp_years": round(float(exps[i]), 1),
+                "exp_years": exp_years,
+                # Per-resume analysis, mirroring the deep pipeline's component shape
+                # (same 50/25/15/10 weights) so the frontend renders it the same way.
+                "skill_gap_pct": round((1.0 - skill_v) * 100, 1),
+                "components": {
+                    "skills": {
+                        "label": "Skills",
+                        "points": round(50 * skill_v, 1),
+                        "detail": f"{len(matched)} of {len(req)} required skills detected in the resume text",
+                    },
+                    "jd_similarity": {
+                        "label": "Role similarity",
+                        "points": round(25 * sim_v, 1),
+                        "detail": "TF-IDF keyword overlap between the resume and the role's skill profile",
+                    },
+                    "experience": {
+                        "label": "Experience",
+                        "points": round(15 * exp_v, 1),
+                        "detail": (f"~{exp_years} years detected; role asks for {min_exp:g}"
+                                   if min_exp > 0 else "No minimum experience set for this role"),
+                    },
+                    "education": {
+                        "label": "Education",
+                        "points": round(10 * edu_v, 1),
+                        "detail": "Express roles carry no degree requirements",
+                    },
+                },
             })
         best = max(per_role, key=lambda d: d["score"])
         candidates.append({
