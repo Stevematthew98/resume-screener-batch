@@ -780,7 +780,8 @@ async def screen_express(
             finally:
                 db.close()
         except Exception as e:
-            print(f"[express] history persist failed: {e}")
+            import traceback
+            print(f"[express] history persist failed: {e}\n{traceback.format_exc()}")
         result["session_id"] = session_id
         yield _sse({"type": "express_done", **result})
 

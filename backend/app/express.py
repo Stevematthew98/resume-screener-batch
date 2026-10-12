@@ -21,8 +21,23 @@ METHOD_NOTE = (
 )
 
 
-def _band_for(score: float) -> str:
-    # Same thresholds as the deep pipeline's band_for.
+def _to_py(v):
+    """Convert numpy scalars/containers to plain Python types.
+
+    numpy scalar types (e.g. np.float64 from the vectorized scoring) are
+    float subclasses, so JSON output works — but DB drivers (psycopg2)
+    cannot adapt them as bind parameters. Sanitize before persistence.
+    """
+    if isinstance(v, np.generic):
+        return v.item()
+    if isinstance(v, dict):
+        return {k: _to_py(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_to_py(x) for x in v]
+    return v
+
+
+def _band_for(score: float) -> str:    # Same thresholds as the deep pipeline's band_for.
     if score >= 0.65:
         return "Strong match"
     if score >= 0.40:
@@ -186,11 +201,11 @@ def run_express(rows, roles):
         })
 
     elapsed = round(time.time() - t0, 2)
-    return {
+    return _to_py({
         "method": "express",
         "method_note": METHOD_NOTE,
         "elapsed_seconds": elapsed,
         "total_resumes": n,
         "roles": [r["title"] for r in norm_roles],
         "candidates": candidates,
-    }
+    })
