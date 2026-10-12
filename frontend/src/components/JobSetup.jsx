@@ -1,5 +1,6 @@
-import Button from './Button';
 import React, { useRef, useState } from 'react';
+import JSZip from 'jszip';
+import Button from './Button';
 import { Zap } from 'lucide-react';
 
 function Field({ label, hint, children }) {
@@ -51,14 +52,61 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
     setJob((j) => ({ ...j, [k]: v }));
   }
 
-  function addFiles(list) {
-    const incoming = Array.from(list || []).filter((f) => /\.(pdf|docx?|doc)$/i.test(f.name));
+  const [extracting, setExtracting] = useState(false);
+
+  const MIME = {
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc: 'application/msword',
+  };
+
+  // Expand a .zip dataset into individual resume files (client-side, via JSZip).
+  // Skips folders, macOS metadata and non-resume entries.
+  async function expandZip(file) {
+    const zip = await JSZip.loadAsync(file);
+    const out = [];
+    const entries = Object.values(zip.files);
+    for (const entry of entries) {
+      if (entry.dir) continue;
+      const base = entry.name.split('/').pop();
+      if (!base || base.startsWith('.') || base.startsWith('__MACOSX')) continue;
+      const m = /\.([^.]+)$/.exec(base);
+      const ext = (m && m[1] || '').toLowerCase();
+      if (!/^(pdf|docx?|doc)$/.test(ext)) continue;
+      const blob = await entry.async('blob');
+      out.push(new File([blob], base, { type: MIME[ext] || 'application/octet-stream' }));
+    }
+    return out;
+  }
+
+  async function addFiles(list) {
+    const raw = Array.from(list || []);
+    if (!raw.length) return;
+    let incoming = [];
+    const zips = raw.filter((f) => /\.zip$/i.test(f.name));
+    incoming = raw.filter((f) => /\.(pdf|docx?|doc)$/i.test(f.name));
+    if (zips.length) {
+      setExtracting(true);
+      try {
+        for (const z of zips) {
+          const expanded = await expandZip(z);
+          incoming = incoming.concat(expanded);
+        }
+      } catch {
+        // corrupt zip: ignore it, keep any valid files already collected
+      } finally {
+        setExtracting(false);
+      }
+    }
     if (!incoming.length) return;
     setFiles((prev) => {
       const names = new Set(prev.map((f) => f.name + f.size));
       const merged = [...prev];
       for (const f of incoming) {
-        if (!names.has(f.name + f.size)) merged.push(f);
+        if (!names.has(f.name + f.size)) {
+          names.add(f.name + f.size);
+          merged.push(f);
+        }
       }
       return merged.slice(0, 20);
     });
@@ -140,7 +188,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
         >
-          <input ref={fileInput} type="file" accept=".pdf,.docx,.doc" multiple hidden
+          <input ref={fileInput} type="file" accept=".pdf,.docx,.doc,.zip" multiple hidden
             onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
           <div className="dz-icon">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -149,7 +197,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
             </svg>
           </div>
           <div className="dz-text"><strong>Drop resumes here</strong> or click to browse</div>
-          <div className="dz-sub">PDF or Word · up to 10 MB each · max 20 files</div>
+          <div className="dz-sub">PDF, Word, or a .zip dataset · up to 10 MB each · max 20 files{extracting ? ' · extracting zip…' : ''}</div>
         </div>
 
         {files.length > 0 && (

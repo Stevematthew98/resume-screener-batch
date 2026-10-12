@@ -1,7 +1,10 @@
-# Resume Screener — NLP-based candidate matching
+# Resume Screener Batch — multi-resume NLP screening (Phase 2)
 
-Upload a resume (PDF/DOCX) and a job description; the backend runs an 8-step NLP
-pipeline and returns a fit assessment with a full, inspectable breakdown.
+Upload a batch of resumes (PDF/DOCX, or a `.zip` dataset) and a job description;
+the backend runs its 8-step NLP pipeline over every file and returns ranked,
+explainable fit assessments. Scoring is identical to the individual screener —
+this project differs only in batch-first UX: one guided studio walk per batch
+and client-side zip dataset extraction.
 
 Monorepo:
 

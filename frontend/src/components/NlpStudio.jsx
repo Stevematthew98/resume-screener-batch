@@ -39,7 +39,6 @@ export default function NlpStudio({
   const [autoNav, setAutoNav] = useState(false); // countdown to auto-open the final result
   const [autoNavSecs, setAutoNavSecs] = useState(5);
   const [now, setNow] = useState(Date.now());
-  const walkResumeKey = useRef(null);
   const batchDoneAt = useRef(null); // captured once when the batch completes
   const autoNavDone = useRef(false); // auto-open fires once per run
   const viewRankingRef = useRef(onViewRanking);
@@ -58,7 +57,6 @@ export default function NlpStudio({
     setShowSummary(true);
     setWalkN(1);
     setAutoNav(false);
-    walkResumeKey.current = null;
     batchDoneAt.current = null;
     autoNavDone.current = false;
   }, [startedAt]);
@@ -106,24 +104,18 @@ export default function NlpStudio({
 
   const failed = selected && selected.status === 'error';
 
-  // Is this studio stage's real backend data recorded for the selected resume?
+  // Batch mode: ONE guided walk per batch (not per resume). The walk follows
+  // the live backend — stage readiness is gated on the currently RUNNING
+  // resume, so the walk tracks the batch as a whole instead of restarting
+  // for every file. The workbench auto-follows the running resume.
+  const walkResume = running || resumes[0] || null;
   function stageReady(execKey) {
     if (execKey === '__batch__') return batchComplete;
-    if (!selected) return false;
-    if (selected.status === 'done') return true;
-    const e = exec[execKey];
-    return !!(e && e.status === 'done');
+    if (!walkResume) return false;
+    if (walkResume.status === 'done') return true;
+    const st = walkResume.stages.find((s) => s.key === execKey);
+    return !!(st && st.status === 'done');
   }
-
-  // A new resume starting mid-batch restarts the guided walk for it.
-  useEffect(() => {
-    if (!running) return;
-    if (walkResumeKey.current !== running.key) {
-      walkResumeKey.current = running.key;
-      setWalkN(1);
-      setPinnedStage(null);
-    }
-  }, [running]);
 
   // Guided walk director: one stage at a time, ~3 seconds each (≈60s total).
   // A stage is only marked done once its REAL backend output is recorded —
@@ -262,8 +254,8 @@ export default function NlpStudio({
       <section className="card rise studio-top">
         <div className="studio-top-head">
           <div>
-            <div className="card-eyebrow">TalentIQ · NLP Processing Studio</div>
-            <h2>Analyzing Resume</h2>
+            <div className="card-eyebrow">TalentIQ · NLP Processing Studio · Batch mode</div>
+            <h2>{total > 1 ? 'Analyzing Resumes' : 'Analyzing Resume'}</h2>
             <p className="hint">Extracting skills, processing language, and evaluating job alignment.</p>
           </div>
           <div className="studio-metrics">
