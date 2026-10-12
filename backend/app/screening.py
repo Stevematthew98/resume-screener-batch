@@ -213,7 +213,8 @@ FAIRNESS_NOTE = (
 
 
 def build_candidate(resume_id: str, filename: str, job: dict, stages: dict,
-                    personalization: dict = None) -> dict:
+                    personalization: dict = None,
+                    candidate_name: str = None) -> dict:
     s3 = stages["step3_preprocessing"]
     s4 = stages["step4_vectors"]
     s5 = stages["step5_matching"]
@@ -224,6 +225,10 @@ def build_candidate(resume_id: str, filename: str, job: dict, stages: dict,
     exp_years = s3.get("experience_years", 0.0)
     degrees = s3.get("degrees", [])
     personal = s3.get("personal", {"name": "", "email": "", "phone": ""})
+    if candidate_name:
+        # CSV dataset supplied an explicit name column — display it instead of
+        # the heuristic name extracted from text. Names are never scored.
+        personal = {**personal, "name": candidate_name}
 
     skills = _skills_component(resume_skills, job["required_skills"],
                                job["preferred_skills"], jd_skills, personalization)
@@ -351,7 +356,8 @@ def ranking_row(candidate: dict) -> dict:
 
 
 def screen_one_resume(file_bytes: bytes, filename: str, job: dict, resume_id: str,
-                      personalization: dict = None, pre_extracted_text: str = None):
+                      personalization: dict = None, pre_extracted_text: str = None,
+                      candidate_name: str = None):
     """Generator yielding ('stage', {...}) per completed stage, then
     ('candidate', candidate_dict) — or ('error', {'message': ...}) when text
     extraction failed, so a bad file is never scored as a weak match.
@@ -372,4 +378,5 @@ def screen_one_resume(file_bytes: bytes, filename: str, job: dict, resume_id: st
     if extraction_error:
         yield ("error", {"message": extraction_error, "filename": filename})
         return
-    yield ("candidate", build_candidate(resume_id, filename, job, stages, personalization))
+    yield ("candidate", build_candidate(resume_id, filename, job, stages, personalization,
+                                       candidate_name=candidate_name))

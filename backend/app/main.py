@@ -424,7 +424,7 @@ def _parse_csv_dataset(filename: str, data: bytes):
         cat = (r.get(cat_col) or "").strip() if cat_col else ""
         label = name or (f"{cat} · Row {i}" if cat else f"Row {i}")
         label = re.sub(r"[\\/:*?\"<>|]", " ", label).strip()[:60] or f"Row {i}"
-        out.append((f"{label}.csv", t))
+        out.append((f"{label}.csv", t, name or None))
         if len(out) >= MAX_BATCH_FILES:
             break
     if not out:
@@ -501,8 +501,8 @@ async def screen_stream(
         raise HTTPException(status_code=400, detail="Upload at least one resume.")
 
     # Read uploads; expand CSV datasets (one row == one resume) into
-    # individual items. items = (filename, data, pre_extracted_text).
-    items: list[tuple[str, bytes, Optional[str]]] = []
+    # individual items. items = (filename, data, pre_extracted_text, candidate_name).
+    items: list[tuple[str, bytes, Optional[str], Optional[str]]] = []
     csv_notes: list[str] = []
     for up in resumes:
         filename = up.filename or "resume"
@@ -510,14 +510,14 @@ async def screen_stream(
         ext = _check_upload(filename, data)
         if ext == "csv":
             rows, info = _parse_csv_dataset(filename, data)
-            for disp_name, text in rows:
-                items.append((disp_name, b"", text))
+            for disp_name, text, name in rows:
+                items.append((disp_name, b"", text, name))
             if info["truncated"]:
                 csv_notes.append(
                     f"'{filename}': {info['total_rows']} rows — "
                     f"screening the first {info['used_rows']}.")
         else:
-            items.append((filename, data, None))
+            items.append((filename, data, None, None))
     # Resume bytes are processed in memory and never logged or persisted.
     if not items:
         raise HTTPException(status_code=400, detail="No resumes to screen.")
@@ -561,14 +561,15 @@ async def screen_stream(
                     "notes": csv_notes})
         ranking: list[dict] = []
         screened = 0
-        for idx, (filename, data, pre_text) in enumerate(items):
+        for idx, (filename, data, pre_text, cand_name) in enumerate(items):
             resume_id = uuid.uuid4().hex
             yield _sse({"type": "resume_start", "resume_id": resume_id,
                         "filename": filename, "index": idx, "total": total})
             try:
                 for kind, payload in screen_one_resume(data, filename, job_spec,
                                                        resume_id, personalization,
-                                                       pre_extracted_text=pre_text):
+                                                       pre_extracted_text=pre_text,
+                                                       candidate_name=cand_name):
                     if kind == "stage":
                         yield _sse({"type": "stage", "resume_id": resume_id,
                                     "filename": filename, "index": idx, "total": total,
