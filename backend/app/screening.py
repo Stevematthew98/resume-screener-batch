@@ -351,14 +351,15 @@ def ranking_row(candidate: dict) -> dict:
 
 
 def screen_one_resume(file_bytes: bytes, filename: str, job: dict, resume_id: str,
-                      personalization: dict = None):
+                      personalization: dict = None, pre_extracted_text: str = None):
     """Generator yielding ('stage', {...}) per completed stage, then
     ('candidate', candidate_dict) — or ('error', {'message': ...}) when text
     extraction failed, so a bad file is never scored as a weak match.
     Shares the exact pipeline as /api/analyze."""
     stages = {}
     for key, out in run_pipeline_stages(file_bytes, filename, job["jd_text"],
-                                       job["min_experience_years"]):
+                                       job["min_experience_years"],
+                                       pre_extracted_text=pre_extracted_text):
         stages[key] = out
         yield ("stage", {
             "stage": key,

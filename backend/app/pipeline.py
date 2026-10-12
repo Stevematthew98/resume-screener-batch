@@ -333,11 +333,16 @@ def _cos(a, b) -> float:
 # ----------------------------------------------------------------------------
 
 def run_pipeline_stages(file_bytes: bytes, filename: str, job_description: str,
-                      min_experience_years: float = 0.0):
+                      min_experience_years: float = 0.0,
+                      pre_extracted_text: str = None):
     """Run the 8 pipeline stages, yielding (stage_key, stage_output) as each completes.
 
     `analyze_resume` collects these into the classic full result dict, so both the
     regular endpoint and the streaming endpoint share one code path.
+
+    `pre_extracted_text`: when the resume text is already available (e.g. a row
+    from an uploaded CSV dataset), step 2 uses it directly instead of parsing a
+    file. Every downstream stage is byte-identical to the file path.
     """
     ensure_models()
     analysis_id = uuid.uuid4().hex
@@ -357,7 +362,10 @@ def run_pipeline_stages(file_bytes: bytes, filename: str, job_description: str,
     # ---- Step 2: extraction --------------------------------------------------
     jd_text = (job_description or "").strip()
     extraction_error = None
-    if not file_bytes:
+    if pre_extracted_text is not None:
+        # CSV dataset row: text supplied directly, no file parsing involved.
+        raw_text, method, ocr_used = pre_extracted_text, "csv_row", False
+    elif not file_bytes:
         raw_text, method, ocr_used = "", "empty", False
         extraction_error = "No file content was received — the upload appears to be empty."
     elif ext == "pdf":

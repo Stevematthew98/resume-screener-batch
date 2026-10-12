@@ -6,8 +6,11 @@ CSV/Excel/PDF exports. The NLP pipeline itself (pipeline.py / screening.py)
 is untouched — Phase 2 wraps it with persistence and management.
 """
 
+import csv
+import io
 import json
 import os
+import re
 import uuid
 from typing import Any, Optional
 
@@ -306,14 +309,14 @@ def delete_job(job_id: int, user: User = Depends(get_current_user)):
 
 MAX_BATCH_FILES = 20
 MAX_FILE_BYTES = 10 * 1024 * 1024
-ALLOWED_EXTS = ("pdf", "docx", "doc")
+ALLOWED_EXTS = ("pdf", "docx", "doc", "csv")
 
 
 def _check_upload(filename: str, data: bytes) -> str:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in ALLOWED_EXTS:
         raise HTTPException(status_code=400,
-                            detail=f"'{filename}': only PDF and DOCX resumes are supported.")
+                            detail=f"'{filename}': only PDF, DOCX, and CSV resumes are supported.")
     if not data:
         raise HTTPException(status_code=400, detail=f"'{filename}' is empty.")
     if len(data) > MAX_FILE_BYTES:
@@ -323,6 +326,120 @@ def _check_upload(filename: str, data: bytes) -> str:
 
 def _sse(obj: dict) -> str:
     return "data: " + json.dumps(obj, default=str) + "\n\n"
+
+
+# ----------------------------------------------------------------------------
+# CSV resume datasets (e.g. Kaggle) — one row == one resume
+# ----------------------------------------------------------------------------
+
+CSV_TEXT_HINTS = ("resume", "resume_str", "resume_text", "cv", "profile", "text",
+                  "content", "description", "summary", "details", "bio")
+CSV_CATEGORY_HINTS = ("category", "label", "job_category", "class", "target",
+                      "domain", "profession")
+CSV_NAME_HINTS = ("name", "candidate", "candidate_name", "applicant", "full_name",
+                  "fullname", "person")
+CSV_ID_HINTS = ("id", "index", "sno", "sr", "serial", "row", "slno")
+
+
+def _norm_col(c: str) -> str:
+    return "".join(ch for ch in (c or "").lower() if ch.isalnum())
+
+
+def _find_col(columns, hints):
+    for hint in hints:
+        for c in columns:
+            if hint in _norm_col(c):
+                return c
+    return None
+
+
+def _parse_csv_dataset(filename: str, data: bytes):
+    """Parse an uploaded CSV resume dataset (e.g. from Kaggle).
+
+    Returns (rows, info): rows = [(display_name, resume_text), ...] capped at
+    MAX_BATCH_FILES; info describes column detection + truncation for honesty.
+    Raises HTTPException(400) with a human-readable message when unusable.
+    """
+    text = None
+    for enc in ("utf-8-sig", "latin-1"):
+        try:
+            text = data.decode(enc)
+            break
+        except (UnicodeDecodeError, ValueError):
+            continue
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail=f"'{filename}' is empty.")
+    try:
+        dialect = csv.Sniffer().sniff(text[:65536], delimiters=[",", ";", "\t", "|"])
+    except Exception:
+        dialect = csv.excel
+    try:
+        reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+        columns = reader.fieldnames
+        rows_raw = [r for r in reader if r]
+    except Exception:
+        columns, rows_raw = None, []
+    if not columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{filename}': could not read a header row — is this a valid CSV?")
+    if not rows_raw:
+        raise HTTPException(status_code=400,
+                            detail=f"'{filename}' has no data rows.")
+    text_col = _find_col(columns, CSV_TEXT_HINTS)
+    if not text_col:
+        # Fallback: the non-id column with the longest average content.
+        best, best_avg = None, -1.0
+        for c in columns:
+            if _norm_col(c) in CSV_ID_HINTS:
+                continue
+            vals = [(r.get(c) or "") for r in rows_raw]
+            avg = sum(len(v) for v in vals) / max(len(vals), 1)
+            if avg > best_avg:
+                best, best_avg = c, avg
+        text_col = best
+    cat_col = _find_col(columns, CSV_CATEGORY_HINTS)
+    name_col = _find_col(columns, CSV_NAME_HINTS)
+    if not text_col or not any((r.get(text_col) or "").strip() for r in rows_raw):
+        shown = ", ".join(columns[:8])
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{filename}': no resume text found — looked for a resume/text "
+                   f"column among: {shown}.")
+    avg_len = sum(len(r.get(text_col) or "") for r in rows_raw) / max(len(rows_raw), 1)
+    if avg_len < 50:
+        shown = ", ".join(columns[:8])
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{filename}': the '{text_col}' column averages "
+                   f"{avg_len:.0f} characters — not resume text (columns: {shown}).")
+    total_rows = len(rows_raw)
+    out, skipped = [], 0
+    for i, r in enumerate(rows_raw, start=1):
+        t = (r.get(text_col) or "").strip()
+        if not t:
+            skipped += 1
+            continue
+        name = (r.get(name_col) or "").strip() if name_col else ""
+        cat = (r.get(cat_col) or "").strip() if cat_col else ""
+        label = name or (f"{cat} · Row {i}" if cat else f"Row {i}")
+        label = re.sub(r"[\\/:*?\"<>|]", " ", label).strip()[:60] or f"Row {i}"
+        out.append((f"{label}.csv", t))
+        if len(out) >= MAX_BATCH_FILES:
+            break
+    if not out:
+        raise HTTPException(status_code=400,
+                            detail=f"'{filename}': the resume-text column is empty.")
+    info = {
+        "total_rows": total_rows,
+        "used_rows": len(out),
+        "skipped_empty": skipped,
+        "truncated": len(out) < (total_rows - skipped),
+        "text_column": text_col,
+        "category_column": cat_col,
+        "name_column": name_col,
+    }
+    return out, info
 
 
 def _persist_candidate(db, session_id: int, resume_id: str, filename: str, payload: dict) -> None:
@@ -368,8 +485,9 @@ async def screen_stream(
 ):
     """Screen a batch of resumes with live per-resume NLP stage events (SSE).
 
-    Form fields: resumes (1..20 files), job (JSON job spec), job_id (optional,
-    links this run to a saved job profile). Requires auth.
+    Form fields: resumes (1..20 files — PDF, DOCX, or CSV datasets where one
+    row == one resume), job (JSON job spec), job_id (optional, links this run
+    to a saved job profile). Requires auth.
     Event types: job_ready, resume_start, stage, resume_done, resume_error,
     batch_complete.
     """
@@ -381,8 +499,31 @@ async def screen_stream(
         raise HTTPException(status_code=400, detail="Job description text is required.")
     if not resumes:
         raise HTTPException(status_code=400, detail="Upload at least one resume.")
-    if len(resumes) > MAX_BATCH_FILES:
-        raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_FILES} resumes per batch.")
+
+    # Read uploads; expand CSV datasets (one row == one resume) into
+    # individual items. items = (filename, data, pre_extracted_text).
+    items: list[tuple[str, bytes, Optional[str]]] = []
+    csv_notes: list[str] = []
+    for up in resumes:
+        filename = up.filename or "resume"
+        data = await up.read()
+        ext = _check_upload(filename, data)
+        if ext == "csv":
+            rows, info = _parse_csv_dataset(filename, data)
+            for disp_name, text in rows:
+                items.append((disp_name, b"", text))
+            if info["truncated"]:
+                csv_notes.append(
+                    f"'{filename}': {info['total_rows']} rows — "
+                    f"screening the first {info['used_rows']}.")
+        else:
+            items.append((filename, data, None))
+    # Resume bytes are processed in memory and never logged or persisted.
+    if not items:
+        raise HTTPException(status_code=400, detail="No resumes to screen.")
+    if len(items) > MAX_BATCH_FILES:
+        raise HTTPException(status_code=400,
+                            detail=f"Maximum {MAX_BATCH_FILES} resumes per batch.")
 
     db = get_session()
     linked_job_id = None
@@ -401,7 +542,7 @@ async def screen_stream(
         job_title=job_spec["title"],
         job_company=job_spec["company"],
         job_snapshot=job_spec,
-        total_resumes=len(resumes),
+        total_resumes=len(items),
         screened_count=0,
     )
     db.add(session)
@@ -413,27 +554,21 @@ async def screen_stream(
     personalization = get_personalization(db, user.id)
     db.close()
 
-    items: list[tuple[str, bytes]] = []
-    for up in resumes:
-        filename = up.filename or "resume"
-        data = await up.read()
-        _check_upload(filename, data)
-        items.append((filename, data))
-    # Resume bytes are processed in memory and never logged or persisted.
-
     async def event_gen():
         total = len(items)
         yield _sse({"type": "job_ready", "total": total, "session_id": session_id,
-                    "job": {"title": job_spec["title"], "company": job_spec["company"]}})
+                    "job": {"title": job_spec["title"], "company": job_spec["company"]},
+                    "notes": csv_notes})
         ranking: list[dict] = []
         screened = 0
-        for idx, (filename, data) in enumerate(items):
+        for idx, (filename, data, pre_text) in enumerate(items):
             resume_id = uuid.uuid4().hex
             yield _sse({"type": "resume_start", "resume_id": resume_id,
                         "filename": filename, "index": idx, "total": total})
             try:
                 for kind, payload in screen_one_resume(data, filename, job_spec,
-                                                       resume_id, personalization):
+                                                       resume_id, personalization,
+                                                       pre_extracted_text=pre_text):
                     if kind == "stage":
                         yield _sse({"type": "stage", "resume_id": resume_id,
                                     "filename": filename, "index": idx, "total": total,

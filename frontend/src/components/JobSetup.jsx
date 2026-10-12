@@ -53,12 +53,43 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
   }
 
   const [extracting, setExtracting] = useState(false);
+  const [slotHint, setSlotHint] = useState('');
 
   const MIME = {
     pdf: 'application/pdf',
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     doc: 'application/msword',
   };
+
+  // Lightweight quote-aware CSV record parser (display sniffing only —
+  // the backend does the authoritative parse).
+  function parseCsvRecords(text) {
+    const records = [];
+    let field = '', record = [], inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQuotes = false;
+        } else field += c;
+      } else if (c === '"') inQuotes = true;
+      else if (c === ',') { record.push(field); field = ''; }
+      else if (c === '\n') { record.push(field); records.push(record); record = []; field = ''; }
+      else if (c !== '\r') field += c;
+    }
+    if (field !== '' || record.length) { record.push(field); records.push(record); }
+    return records;
+  }
+
+  async function sniffCsv(file) {
+    const text = (await file.text()).replace(/^﻿/, '');
+    const records = parseCsvRecords(text);
+    return { rows: records.length > 1 ? records.length - 1 : 0 };
+  }
+
+  // One CSV dataset counts as min(rows, 20) resume slots toward the 20 cap.
+  const slotsOf = (f) => (f._csvInfo ? Math.min(f._csvInfo.rows, 20) : 1);
 
   // Expand a .zip dataset into individual resume files (client-side, via JSZip).
   // Skips folders, macOS metadata and non-resume entries.
@@ -82,8 +113,10 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
   async function addFiles(list) {
     const raw = Array.from(list || []);
     if (!raw.length) return;
+    setSlotHint('');
     let incoming = [];
     const zips = raw.filter((f) => /\.zip$/i.test(f.name));
+    const csvs = raw.filter((f) => /\.csv$/i.test(f.name));
     incoming = raw.filter((f) => /\.(pdf|docx?|doc)$/i.test(f.name));
     if (zips.length) {
       setExtracting(true);
@@ -98,17 +131,37 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
         setExtracting(false);
       }
     }
+    if (csvs.length) {
+      setExtracting(true);
+      try {
+        for (const c of csvs) {
+          try {
+            const { rows } = await sniffCsv(c);
+            c._csvInfo = { rows };
+          } catch {
+            c._csvInfo = { rows: 0 };
+          }
+          incoming.push(c);
+        }
+      } finally {
+        setExtracting(false);
+      }
+    }
     if (!incoming.length) return;
     setFiles((prev) => {
       const names = new Set(prev.map((f) => f.name + f.size));
       const merged = [...prev];
+      let used = prev.reduce((n, f) => n + slotsOf(f), 0);
+      let skipped = false;
       for (const f of incoming) {
-        if (!names.has(f.name + f.size)) {
-          names.add(f.name + f.size);
-          merged.push(f);
-        }
+        if (names.has(f.name + f.size)) continue;
+        if (used + slotsOf(f) > 20) { skipped = true; continue; }
+        names.add(f.name + f.size);
+        merged.push(f);
+        used += slotsOf(f);
       }
-      return merged.slice(0, 20);
+      if (skipped) setSlotHint('Batch is full (20 resumes) — remove something to add more.');
+      return merged;
     });
   }
 
@@ -121,6 +174,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
   }
 
   const totalKB = files.reduce((a, f) => a + f.size, 0) / 1024;
+  const totalSlots = files.reduce((n, f) => n + slotsOf(f), 0);
 
   return (
     <div className="setup-grid">
@@ -188,7 +242,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
         >
-          <input ref={fileInput} type="file" accept=".pdf,.docx,.doc,.zip" multiple hidden
+          <input ref={fileInput} type="file" accept=".pdf,.docx,.doc,.zip,.csv" multiple hidden
             onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
           <div className="dz-icon">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -197,8 +251,9 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
             </svg>
           </div>
           <div className="dz-text"><strong>Drop resumes here</strong> or click to browse</div>
-          <div className="dz-sub">PDF, Word, or a .zip dataset · up to 10 MB each · max 20 files{extracting ? ' · extracting zip…' : ''}</div>
+          <div className="dz-sub">PDF, Word, .zip, or a Kaggle CSV dataset · up to 10 MB each · max 20 resumes{extracting ? ' · reading…' : ''}</div>
         </div>
+        {slotHint && <div className="hint" role="status">{slotHint}</div>}
 
         {files.length > 0 && (
           <div className="file-list">
@@ -206,18 +261,22 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
               <div key={f.name + f.size} className="file-row">
                 <span className="file-badge">{f.name.split('.').pop().toUpperCase()}</span>
                 <span className="file-name">{f.name}</span>
-                <span className="file-size">{(f.size / 1024).toFixed(0)} KB</span>
+                <span className="file-size">
+                  {f._csvInfo
+                    ? `${f._csvInfo.rows} row${f._csvInfo.rows === 1 ? '' : 's'}${f._csvInfo.rows > 20 ? ' → first 20 screened' : ''}`
+                    : `${(f.size / 1024).toFixed(0)} KB`}
+                </span>
                 <Button type="button" className="file-remove" onClick={() => removeFile(i)} aria-label={`Remove ${f.name}`} title={`Remove ${f.name}`}>✕</Button>
               </div>
             ))}
-            <div className="file-total">{files.length} file{files.length > 1 ? 's' : ''} · {totalKB.toFixed(0)} KB total</div>
+            <div className="file-total">{totalSlots} resume{totalSlots === 1 ? '' : 's'} · {totalKB.toFixed(0)} KB total</div>
           </div>
         )}
 
         {error && <div className="alert" role="alert">{error}</div>}
 
         <Button className="cta" type="button" onClick={onScreen} disabled={files.length === 0}>
-          Screen {files.length > 0 ? `${files.length} resume${files.length > 1 ? 's' : ''}` : 'resumes'} →
+          Screen {files.length > 0 ? `${totalSlots} resume${totalSlots === 1 ? '' : 's'}` : 'resumes'} →
         </Button>
         <p className="cta-hint">You will watch each resume being analysed, then get a ranked shortlist.</p>
       </section>
