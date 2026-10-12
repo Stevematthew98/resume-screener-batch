@@ -417,7 +417,6 @@ export default function App() {
       <div className="app-main">
         <header className="workspace-topbar">
           <div className="breadcrumb"><Button className="mobile-menu icon-button" aria-label="Open navigation" aria-expanded={navOpen} onClick={() => setNavOpen(true)}><Menu size={21} /></Button><span>Workspace</span><ChevronRight size={14} /><strong>{({dashboard: 'Dashboard', jobs: 'Job profiles', history: 'Screening history', setup: 'New screening', screening: 'Live screening', ranking: 'Screening results', historyDetail: 'Session results'})[view]}</strong></div>
-          <span className="workspace-label"><ScanLine size={15} /> AI recruitment</span>
       </header>
         <main id="workspace-content" className="workspace-content">
           {dataError && <div className="form-error" role="alert">{dataError}</div>}
