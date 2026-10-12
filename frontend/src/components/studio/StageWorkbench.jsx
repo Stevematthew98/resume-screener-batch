@@ -1,7 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy } from 'lucide-react';
 
 const TABS = ['Overview', 'Input / Output', 'Python Code', 'Technical Details'];
+
+// During the guided walk each tab is toured one by one for every stage.
+export const TAB_CYCLE_MS = 1500;
+export const TAB_COUNT = TABS.length;
 
 function fmtDur(ms) {
   if (ms == null) return '—';
@@ -79,15 +83,31 @@ function IoBox({ title, rows, text }) {
   );
 }
 
-export default function StageWorkbench({ stage, execStatus, durationMs, detail, ctx, showCodeLive }) {
+export default function StageWorkbench({ stage, execStatus, durationMs, detail, ctx, autoCycleTabs }) {
   const [tab, setTab] = useState('Overview');
   const stageN = stage ? stage.n : null;
-  // During the guided walk, each stage's working is shown with its code block:
-  // when a new stage comes into focus, switch to its Python Code tab automatically.
-  // The user can still pick any tab freely mid-stage — we only auto-switch on stage change.
+  const pausedRef = useRef(false);
+  // During the guided walk, tour every tab one by one for each stage:
+  // Overview → Input / Output → Python Code → Technical Details, so the
+  // working NLP (not just code) is seen at every step. A manual tab pick
+  // pauses the tour until the next stage — the user keeps control.
   useEffect(() => {
-    if (showCodeLive && stageN != null) setTab('Python Code');
-  }, [stageN, showCodeLive]);
+    if (!autoCycleTabs || stageN == null) return;
+    setTab(TABS[0]);
+    pausedRef.current = false;
+    let i = 0;
+    const t = setInterval(() => {
+      if (pausedRef.current) return;
+      i += 1;
+      if (i >= TABS.length) { clearInterval(t); return; }
+      setTab(TABS[i]);
+    }, TAB_CYCLE_MS);
+    return () => clearInterval(t);
+  }, [stageN, autoCycleTabs]);
+  const pickTab = (t) => {
+    pausedRef.current = true;
+    setTab(t);
+  };
   if (!stage) {
     return (
       <div className="workbench empty">
@@ -113,7 +133,7 @@ export default function StageWorkbench({ stage, execStatus, durationMs, detail, 
       <div className="wb-tabs" role="tablist">
         {TABS.map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t}
-            className={`wb-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+            className={`wb-tab ${tab === t ? 'active' : ''}`} onClick={() => pickTab(t)}>
             {t}
           </button>
         ))}
@@ -142,7 +162,7 @@ export default function StageWorkbench({ stage, execStatus, durationMs, detail, 
             </div>
         )}
 
-        {tab === 'Python Code' && <CodeExplorer code={stage.code} live={!!showCodeLive} />}
+        {tab === 'Python Code' && <CodeExplorer code={stage.code} live={!!autoCycleTabs} />}
 
         {tab === 'Technical Details' && (
           <ul className="viz-list">

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Button from './Button';
-import StageWorkbench from './studio/StageWorkbench';
+import StageWorkbench, { TAB_COUNT, TAB_CYCLE_MS } from './studio/StageWorkbench';
 import { GROUPS, STAGES_ENRICHED } from './studio/studioStages';
 import { STAGE_ORDER } from '../api';
 import {
@@ -66,7 +66,7 @@ export default function NlpStudio({
     if (batchComplete && batchDoneAt.current == null) batchDoneAt.current = Date.now();
   }, [batchComplete]);
 
-  // Guided replay: walk the RECORDED stages, ~3s each ≈ 60 seconds total.
+  // Guided replay: walk the RECORDED stages, touring every workbench tab per stage (≈2 min total).
   // All data shown is from this run's real outputs — clearly labeled as replay.
   useEffect(() => {
     if (replayN == null) return;
@@ -74,7 +74,7 @@ export default function NlpStudio({
       const t = setTimeout(() => setReplayN(null), 2500);
       return () => clearTimeout(t);
     }
-    const t = setTimeout(() => setReplayN(replayN + 1), 3000);
+    const t = setTimeout(() => setReplayN(replayN + 1), TAB_COUNT * TAB_CYCLE_MS);
     return () => clearTimeout(t);
   }, [replayN]);
 
@@ -117,9 +117,10 @@ export default function NlpStudio({
     return !!(st && st.status === 'done');
   }
 
-  // Guided walk director: one stage at a time, ~3 seconds each (≈60s total).
-  // A stage is only marked done once its REAL backend output is recorded —
-  // if the backend is slower than the walk, we wait honestly instead of faking.
+  // Guided walk director: one stage at a time, touring every workbench tab
+  // (Overview → Input / Output → Python Code → Technical Details, ≈6s per stage,
+  // ≈2 min total). A stage is only marked done once its REAL backend output is
+  // recorded — if the backend is slower than the walk, we wait honestly instead of faking.
   //
   // Timing design (two hard-won lessons):
   //  - `now` ticks every second, and every SSE event gives `selected` a new
@@ -139,7 +140,9 @@ export default function NlpStudio({
       const stage = STAGES_ENRICHED[walkN - 1];
       if (!stageReady(stage.execKey)) { walkStageStart.current = null; return; }
       if (walkStageStart.current == null) walkStageStart.current = Date.now();
-      if (Date.now() - walkStageStart.current >= 3000) {
+      // Each stage is viewed long enough to tour every workbench tab once
+      // (Overview → Input / Output → Python Code → Technical Details).
+      if (Date.now() - walkStageStart.current >= TAB_COUNT * TAB_CYCLE_MS) {
         walkStageStart.current = null;
         // 20 → null directly: walkN must NEVER render as 21, because the
         // header reads STAGES_ENRICHED[walkN - 1].name and [20] is undefined
@@ -199,7 +202,7 @@ export default function NlpStudio({
   const elapsed = startedAt ? now - startedAt : 0;
   const rate = elapsed > 0 && doneCount > 0 ? doneCount / elapsed : 0;
   const eta = rate > 0 && doneCount < total ? Math.round((total - doneCount) / rate) : null;
-  const walkEta = walking ? (21 - walkN) * 3000 : null; // ≈3s per remaining stage
+  const walkEta = walking ? (21 - walkN) * TAB_COUNT * TAB_CYCLE_MS : null; // one full tab tour per remaining stage
   const activeLabel = walking && walkN <= 20
     ? `Stage ${walkN} of 20 · ${STAGES_ENRICHED[walkN - 1].name}`
     : running
@@ -296,7 +299,7 @@ export default function NlpStudio({
           <div className="studio-done-actions">
             <Button type="button" className="btn-primary btn-sm" onClick={goToResults}>View Candidate Analysis</Button>
             <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); }}>Explore NLP Results</Button>
-            <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); setReplayN(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Replay pipeline (≈60 sec)</Button>
+            <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); setReplayN(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Replay pipeline (≈2 min)</Button>
             <Button type="button" className="btn-ghost btn-sm" onClick={goToResults}>Return to Candidate Rankings</Button>
           </div>
         </section>
@@ -410,7 +413,7 @@ export default function NlpStudio({
             durationMs={(!stage.sub || stage.firstOfExec) ? durations[stage.execKey] : null}
             detail={(exec[stage.execKey] || {}).detail}
             ctx={ctx}
-            showCodeLive={walkFocus && stage.n === walkN}
+            autoCycleTabs={(walkFocus && stage.n === walkN) || (replayN != null && stage.n === replayN)}
           />
         </section>
       </div>
