@@ -285,7 +285,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
             </svg>
           </div>
           <div className="dz-text"><strong>Drop resumes here</strong> or click to browse</div>
-          <div className="dz-sub">PDF, Word, .zip, or a Kaggle CSV dataset · up to 10 MB each · max 20 resumes{extracting ? ' · reading…' : ''}</div>
+          <div className="dz-sub">PDF, Word, .zip, or a Kaggle CSV dataset · up to 10 MB per file (50 MB for CSV datasets) · max 20 resumes{extracting ? ' · reading…' : ''}</div>
         </div>
         {slotHint && <div className="hint" role="status">{slotHint}</div>}
 

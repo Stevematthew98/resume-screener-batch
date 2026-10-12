@@ -309,6 +309,7 @@ def delete_job(job_id: int, user: User = Depends(get_current_user)):
 
 MAX_BATCH_FILES = 20
 MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_CSV_BYTES = 50 * 1024 * 1024  # datasets are bigger than single resumes
 ALLOWED_EXTS = ("pdf", "docx", "doc", "csv")
 
 
@@ -319,8 +320,10 @@ def _check_upload(filename: str, data: bytes) -> str:
                             detail=f"'{filename}': only PDF, DOCX, and CSV resumes are supported.")
     if not data:
         raise HTTPException(status_code=400, detail=f"'{filename}' is empty.")
-    if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(status_code=400, detail=f"'{filename}' exceeds 10 MB.")
+    limit = MAX_CSV_BYTES if ext == "csv" else MAX_FILE_BYTES
+    if len(data) > limit:
+        raise HTTPException(status_code=400,
+                            detail=f"'{filename}' exceeds {limit // (1024 * 1024)} MB.")
     return ext
 
 
