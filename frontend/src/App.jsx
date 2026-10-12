@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Button from './components/Button';
-import { LayoutDashboard, BriefcaseBusiness, History, ScanLine, LogOut, Menu, X, ChevronRight, ShieldCheck, Plus } from 'lucide-react';
+import { LayoutDashboard, History, ScanLine, LogOut, Menu, X, ChevronRight, ShieldCheck, Plus } from 'lucide-react';
 import {
   blankStages,
   createJob,
@@ -19,7 +19,6 @@ import {
 } from './api';
 import Dashboard from './components/Dashboard';
 import Backdrop from './components/Backdrop';import HistoryView from './components/HistoryView';
-import JobsView from './components/JobsView';
 import JobSetup, { DEFAULT_ROLES } from './components/JobSetup';
 import ExpressResults from './components/ExpressResults';
 import Login from './components/Login';
@@ -396,7 +395,6 @@ export default function App() {
     ['setup', 'New screening'],
     ['dashboard', 'Dashboard'],
     ['history', 'History'],
-    ['jobs', 'Jobs'],
   ];
 
   return (
@@ -409,13 +407,13 @@ export default function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav className="sidebar-nav" aria-label="Main navigation">
           {nav.map(([v, label]) => {
-            const Icon = v === 'dashboard' ? LayoutDashboard : v === 'jobs' ? BriefcaseBusiness : v === 'setup' ? Plus : History;
+            const Icon = v === 'dashboard' ? LayoutDashboard : v === 'setup' ? Plus : History;
             const active = view === v || (v === 'history' && isHistoryDetail) || (v === 'setup' && ['setup', 'screening', 'ranking', 'express'].includes(view));
             return <Button key={v} className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined} onClick={() => {
               setNavOpen(false);
               if (v === 'setup') { goSetup(null); return; }
               setDataError(''); setDataLoading(true);
-              const request = v === 'dashboard' ? refreshDashboard() : v === 'jobs' ? refreshJobs() : refreshSessions();
+              const request = v === 'dashboard' ? refreshDashboard() : refreshSessions();
               request.catch(() => setDataError('Could not load this page. Please check the screening service.')).finally(() => setDataLoading(false));
               setView(v); window.scrollTo({ top: 0, behavior: 'smooth' });
             }}><Icon size={19} /><span>{label}</span>{active && <ChevronRight size={16} />}</Button>;
@@ -440,15 +438,6 @@ export default function App() {
         />
       )}
 
-      {view === 'jobs' && (
-        <JobsView
-          jobs={jobs} loading={dataLoading} error={dataError}
-          onRefresh={refreshJobs}
-          onScreenJob={(j) => goSetup(j)}
-          onNewJob={() => goSetup(null)}
-        />
-      )}
-
       {view === 'history' && (
         <HistoryView sessions={sessions} loading={dataLoading} error={dataError} onOpenSession={openSession} />
       )}
@@ -456,7 +445,7 @@ export default function App() {
       {view === 'setup' && (
         <>
           <div className="dash-head"><div><h2>New screening</h2><p>Set up your role and build an evidence-led shortlist.</p></div></div>
-          <Button type="button" className="back-link" onClick={() => setView(activeJobId ? 'jobs' : 'dashboard')}>
+          <Button type="button" className="back-link" onClick={() => setView('dashboard')}>
             ← Back
           </Button>
           <JobSetup job={job} setJob={setJob} files={files} setFiles={setFiles}
