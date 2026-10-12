@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Check, ChevronDown, Copy } from 'lucide-react';
 
-const TABS = ['Overview', 'Input / Output', 'Visualization', 'Python Code', 'Technical Details'];
+const TABS = ['Overview', 'Input / Output', 'Python Code', 'Technical Details'];
 
 function fmtDur(ms) {
   if (ms == null) return '—';
@@ -11,113 +11,6 @@ function fmtDur(ms) {
 
 function StatusBadge({ status }) {
   return <span className={`st-badge ${status}`}>{status}</span>;
-}
-
-/* ---------------- visualization renderers ---------------- */
-
-function Viz({ viz }) {
-  if (!viz) return <p className="hint">No visualization for this stage yet.</p>;
-  switch (viz.kind) {
-    case 'tiles':
-      return (
-        <div className="viz-tiles">
-          {viz.tiles.map(([k, v]) => (
-            <div className="viz-tile" key={k}>
-              <div className="viz-tile-k">{k}</div>
-              <div className="viz-tile-v mono">{v}</div>
-            </div>
-          ))}
-        </div>
-      );
-    case 'chips':
-      return (
-        <div>
-          {viz.title && <div className="viz-h">{viz.title}</div>}
-          {viz.items && viz.items.length ? (
-            <div className="chip-row">{viz.items.map((c) => <span className="chip" key={c}>{c}</span>)}</div>
-          ) : <p className="hint">{viz.empty || 'Nothing detected.'}</p>}
-        </div>
-      );
-    case 'bars':
-      return (
-        <div className="viz-bars">
-          {viz.bars.map(([label, v]) => {
-            const pct = v == null ? 0 : Math.max(0, Math.min(1, Number(v)));
-            return (
-              <div className="viz-bar-row" key={label}>
-                <div className="viz-bar-head"><span>{label}</span><span className="mono">{v == null ? '—' : `${Math.round(pct * 100)}%`}</span></div>
-                <div className="viz-bar-track"><div className="viz-bar-fill" style={{ width: `${pct * 100}%` }} /></div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    case 'sections':
-      return (
-        <div>
-          <div className="viz-h">Detected sections{vic_method(viz)}</div>
-          {viz.sections && viz.sections.length ? (
-            <div className="section-map">
-              {viz.sections.map((s) => (
-                <div className="section-block" key={s}>
-                  <div className="section-name">{s}</div>
-                  {viz.previews && viz.previews[s] && (
-                    <div className="section-preview">{viz.previews[s].slice(0, 220)}{viz.previews[s].length > 220 ? '…' : ''}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : <p className="hint">No sections detected — the whole document is treated as body text.</p>}
-        </div>
-      );
-    case 'list':
-      return (
-        <div>
-          {viz.title && <div className="viz-h">{viz.title}</div>}
-          {viz.items && viz.items.length ? (
-            <ul className="viz-list">{viz.items.map((t, i) => <li key={i}>{t}</li>)}</ul>
-          ) : <p className="hint">{viz.empty || 'Nothing to show yet.'}</p>}
-        </div>
-      );
-    case 'gap':
-      return (
-        <div className="gap-grid">
-          <div>
-            <div className="viz-h ok">Matched ({viz.matched.length})</div>
-            <div className="chip-row">{viz.matched.map((c) => <span className="chip ok" key={c}>{c}</span>)}</div>
-          </div>
-          <div>
-            <div className="viz-h warn">Not detected ({viz.missing.length})</div>
-            <div className="chip-row">{viz.missing.map((c) => <span className="chip warn" key={c}>{c}</span>)}</div>
-          </div>
-        </div>
-      );
-    case 'ranking':
-      return (
-        <div>
-          <div className="viz-h">Batch ranking</div>
-          {viz.ranking && viz.ranking.length ? (
-            <ol className="rank-list">
-              {viz.ranking.map((r, i) => (
-                <li key={r.resume_id || i} className={r.resume_id === viz.currentId ? 'me' : ''}>
-                  <span className="rank-pos mono">#{i + 1}</span>
-                  <span className="rank-name">{r.filename || r.name || 'Candidate'}</span>
-                  <span className="mono rank-score">{Math.round((r.score || 0) * 100)}%</span>
-                </li>
-              ))}
-            </ol>
-          ) : <p className="hint">Ranking assembles when the batch completes.</p>}
-        </div>
-      );
-    case 'note':
-      return <p className="viz-note">{viz.text}</p>;
-    default:
-      return <p className="hint">No visualization for this stage yet.</p>;
-  }
-}
-
-function vic_method(viz) {
-  return viz.method ? <span className="muted"> · via {viz.method}</span> : null;
 }
 
 /* ---------------- code explorer ---------------- */
@@ -203,7 +96,6 @@ export default function StageWorkbench({ stage, execStatus, durationMs, detail, 
     );
   }
   const io = stage.io(detail, ctx);
-  const viz = stage.viz(detail, ctx);
 
   return (
     <div className="workbench">
@@ -249,8 +141,6 @@ export default function StageWorkbench({ stage, execStatus, durationMs, detail, 
               <IoBox title={`Output — ${io.output.title}`} rows={io.output.rows} text={io.output.text} />
             </div>
         )}
-
-        {tab === 'Visualization' && <Viz viz={viz} />}
 
         {tab === 'Python Code' && <CodeExplorer code={stage.code} live={!!showCodeLive} />}
 
