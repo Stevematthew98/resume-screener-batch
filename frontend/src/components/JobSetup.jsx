@@ -285,7 +285,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
             </svg>
           </div>
           <div className="dz-text"><strong>Drop resumes here</strong> or click to browse</div>
-          <div className="dz-sub">PDF, Word, .zip, or a Kaggle CSV dataset · up to 10 MB per file (50 MB for CSV datasets) · max 20 resumes{extracting ? ' · reading…' : ''}</div>
+          <div className="dz-sub">PDF, Word, .zip, or a Kaggle CSV dataset · up to 10 MB per file (50 MB for CSV datasets) · up to 20 resumes (large CSVs scan all rows in Express mode){extracting ? ' · reading…' : ''}</div>
         </div>
         {slotHint && <div className="hint" role="status">{slotHint}</div>}
 
@@ -297,7 +297,7 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
                 <span className="file-name">{f.name}</span>
                 <span className="file-size">
                   {f._csvInfo
-                    ? `${f._csvInfo.rows} row${f._csvInfo.rows === 1 ? '' : 's'}${f._csvInfo.rows > 20 ? ' → first 20 screened' : ''}`
+                    ? `${f._csvInfo.rows} row${f._csvInfo.rows === 1 ? '' : 's'}${f._csvInfo.rows > 20 ? ' → Express scan, all rows' : ''}`
                     : `${(f.size / 1024).toFixed(0)} KB`}
                 </span>
                 <Button type="button" className="file-remove" onClick={() => removeFile(i)} aria-label={`Remove ${f.name}`} title={`Remove ${f.name}`}>✕</Button>
@@ -310,9 +310,15 @@ export default function JobSetup({ job, setJob, files, setFiles, onScreen, error
         {error && <div className="alert" role="alert">{error}</div>}
 
         <Button className="cta" type="button" onClick={onScreen} disabled={files.length === 0}>
-          Screen {files.length > 0 ? `${totalSlots} resume${totalSlots === 1 ? '' : 's'}` : 'resumes'} →
+          {files.some((f) => f._csvInfo && f._csvInfo.rows > 20)
+            ? `Run Express scan →`
+            : `Screen ${files.length > 0 ? `${totalSlots} resume${totalSlots === 1 ? '' : 's'}` : 'resumes'} →`}
         </Button>
-        <p className="cta-hint">You will watch each resume being analysed, then get a ranked shortlist.</p>
+        <p className="cta-hint">
+          {files.some((f) => f._csvInfo && f._csvInfo.rows > 20)
+            ? 'Every row scored against every job role — the full dataset in under 45 seconds.'
+            : 'You will watch each resume being analysed, then get a ranked shortlist.'}
+        </p>
       </section>
     </div>
     <div className="card rise" style={{ '--d': '160ms', marginTop: 16 }}>
