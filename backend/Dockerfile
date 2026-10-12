@@ -20,10 +20,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend/ .
 RUN python -m spacy download en_core_web_sm && python download_models.py
 
 EXPOSE 8000
