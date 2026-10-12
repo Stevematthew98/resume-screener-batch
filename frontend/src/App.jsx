@@ -190,6 +190,9 @@ export default function App() {
             setExpress((prev) => ({ ...prev, status: 'done', result: evt }));
           }
         }));
+        // The scan is now persisted — dashboard and history reflect it immediately.
+        refreshDashboard().catch(() => {});
+        refreshSessions().catch(() => {});
       } catch (e) {
         if (!e.sessionExpired) {
           setExpress((prev) => (prev ? { ...prev, status: 'error', error: e.message || 'Express scan failed.' } : prev));
@@ -319,6 +322,14 @@ export default function App() {
   async function openSession(id) {
     try {
       const detail = await guard(() => getSessionDetail(id));
+      if (detail.method === 'express') {
+        // Reopen an express dataset scan with its role-tab rankings.
+        setExpress({ status: 'done', result: detail, total: detail.total_resumes,
+                     roles: detail.roles, startedAt: null });
+        setView('express');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
       const st = {};
       (detail.ranking || []).forEach((r) => {
         st[r.resume_id] = { status: r.status || 'Screened', notes: r.notes || '', reject_reason: r.reject_reason || '', filename: r.filename };
@@ -382,9 +393,10 @@ export default function App() {
   }
 
   const nav = [
-    ['jobs', 'Jobs'],
-    ['history', 'History'],
+    ['setup', 'New screening'],
     ['dashboard', 'Dashboard'],
+    ['history', 'History'],
+    ['jobs', 'Jobs'],
   ];
 
   return (
@@ -397,17 +409,17 @@ export default function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav className="sidebar-nav" aria-label="Main navigation">
           {nav.map(([v, label]) => {
-            const Icon = v === 'dashboard' ? LayoutDashboard : v === 'jobs' ? BriefcaseBusiness : History;
-            const active = view === v || (v === 'history' && isHistoryDetail);
+            const Icon = v === 'dashboard' ? LayoutDashboard : v === 'jobs' ? BriefcaseBusiness : v === 'setup' ? Plus : History;
+            const active = view === v || (v === 'history' && isHistoryDetail) || (v === 'setup' && ['setup', 'screening', 'ranking', 'express'].includes(view));
             return <Button key={v} className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined} onClick={() => {
               setNavOpen(false);
+              if (v === 'setup') { goSetup(null); return; }
               setDataError(''); setDataLoading(true);
               const request = v === 'dashboard' ? refreshDashboard() : v === 'jobs' ? refreshJobs() : refreshSessions();
               request.catch(() => setDataError('Could not load this page. Please check the screening service.')).finally(() => setDataLoading(false));
               setView(v); window.scrollTo({ top: 0, behavior: 'smooth' });
             }}><Icon size={19} /><span>{label}</span>{active && <ChevronRight size={16} />}</Button>;
           })}
-          {['setup', 'screening', 'ranking'].includes(view) && <div className="nav-item active" aria-current="page"><ScanLine size={19} /><span>Screening flow</span><ChevronRight size={16} /></div>}
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-trust"><ShieldCheck size={19} /><div>Evidence-led hiring<span>Human decisions. Always.</span></div></div>

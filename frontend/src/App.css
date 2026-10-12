@@ -1278,3 +1278,13 @@ table.express-table { width: 100%; border-collapse: collapse; font-size: 13.5px;
 .express-stat { border: 1px solid var(--line, #e5e7eb); border-radius: 12px; padding: 12px 16px; background: var(--surface, #fff); }
 .express-stat .v { font-size: 24px; font-weight: 700; }
 .express-stat .k { font-size: 12px; color: var(--muted, #64748b); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* Latest analysis card + express badges */
+.latest-card { margin-bottom: 16px; }
+.method-badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; background: #eef2ff; color: #4338ca; }
+.method-badge.express { background: #ecfdf5; color: #047857; }
+.latest-picks { display: flex; flex-direction: column; gap: 8px; }
+.latest-pick { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border: 1px solid var(--line, #e5e7eb); border-radius: 10px; background: var(--surface, #fff); }
+.lp-role { min-width: 130px; font-weight: 600; font-size: 13.5px; }
+.lp-name { flex: 1; font-size: 13.5px; }
+.lp-score { display: flex; align-items: center; gap: 8px; font-size: 13.5px; white-space: nowrap; }

@@ -24,21 +24,27 @@ export default function HistoryView({ sessions, loading = false, error: loadErro
         </div>
       ) : (
         <ul className="session-list big">
-          {sessions.map((s) => (
+          {sessions.map((s) => {
+            const isExpress = s.method === 'express';
+            return (
             <li key={s.id}>
               <Button type="button" className="session-row" onClick={() => onOpenSession(s.id)}>
                 <span className="session-main">
                   <strong>#{s.id} · {s.job_title || 'Untitled role'}</strong>
+                  {isExpress && <span className="method-badge express" style={{ marginLeft: 8 }}>Express dataset</span>}
                   {s.job_company && <span className="muted"> · {s.job_company}</span>}
                 </span>
                 <span className="session-meta">
-                  {s.screened_count}/{s.total_resumes} screened · avg {Math.round((s.avg_score || 0) * 100)}%
+                  {isExpress
+                    ? `${(s.total_resumes || 0).toLocaleString()} resumes × ${(s.roles || []).length} roles`
+                    : `${s.screened_count}/${s.total_resumes} screened`} · avg {Math.round((s.avg_score || 0) * 100)}%
                 </span>
                 <span className="session-date">{fmtDate(s.created_at)}</span>
                 <span className="link-arrow">View →</span>
               </Button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

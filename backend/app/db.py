@@ -90,6 +90,8 @@ class ScreeningSession(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     total_resumes = Column(Integer, nullable=False, default=0)
     screened_count = Column(Integer, nullable=False, default=0)
+    method = Column(String(32), nullable=False, default="deep", server_default="deep")
+    # method: 'deep' (8-stage pipeline) or 'express' (rapid multi-role dataset scan)
 
     user = relationship("User", back_populates="sessions")
     job = relationship("Job", back_populates="sessions")
@@ -171,6 +173,16 @@ def _migrate() -> None:
         else:
             conn.execute(text(
                 "ALTER TABLE feedbacks ADD COLUMN IF NOT EXISTS candidate_id INTEGER"))
+        # screening_sessions.method (express dataset scans)
+        if DB_URL.startswith("sqlite"):
+            scols = [r[1] for r in conn.execute(
+                text("PRAGMA table_info(screening_sessions)")).fetchall()]
+            if "method" not in scols:
+                conn.execute(text(
+                    "ALTER TABLE screening_sessions ADD COLUMN method VARCHAR(32) NOT NULL DEFAULT 'deep'"))
+        else:
+            conn.execute(text(
+                "ALTER TABLE screening_sessions ADD COLUMN IF NOT EXISTS method VARCHAR(32) NOT NULL DEFAULT 'deep'"))
 
 
 def init_db() -> None:
@@ -186,6 +198,7 @@ def get_session():
 def session_to_dict(s: ScreeningSession) -> dict:
     cands = s.candidates or []
     scores = [c.score for c in cands]
+    snap = s.job_snapshot or {}
     return {
         "id": s.id,
         "job_id": s.job_id,
@@ -195,6 +208,9 @@ def session_to_dict(s: ScreeningSession) -> dict:
         "total_resumes": s.total_resumes,
         "screened_count": s.screened_count,
         "avg_score": round(sum(scores) / len(scores), 4) if scores else 0.0,
+        "method": s.method or "deep",
+        "roles": snap.get("roles") or [],
+        "elapsed_seconds": snap.get("elapsed_seconds"),
     }
 
 

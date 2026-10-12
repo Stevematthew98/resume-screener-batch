@@ -627,6 +627,73 @@ async def screen_stream(
 # Express dataset mode — whole CSV scored against multiple roles in seconds
 # ----------------------------------------------------------------------------
 
+def _persist_express_session(db, user_id: int, filename: str, clean_roles: list,
+                           result: dict, dataset_info: dict) -> int:
+    """Save an express dataset scan as a session so Dashboard + History reflect it.
+
+    One Candidate row per resume, scored by its best role; the full per-role
+    score arrays live in profile_json so the role-tab view can be rebuilt.
+    """
+    snap = {
+        "method": "express",
+        "roles": [r["title"] for r in clean_roles],
+        "role_defs": clean_roles,
+        "elapsed_seconds": result.get("elapsed_seconds"),
+        "method_note": result.get("method_note", ""),
+        "dataset": dataset_info,
+    }
+    session = ScreeningSession(
+        user_id=user_id,
+        job_id=None,
+        job_title=filename,
+        job_company="",
+        job_snapshot=snap,
+        total_resumes=len(result.get("candidates", [])),
+        screened_count=len(result.get("candidates", [])),
+        method="express",
+    )
+    db.add(session)
+    db.flush()
+    for i, c in enumerate(result.get("candidates", [])):
+        scores = c.get("scores") or []
+        best = max(scores, key=lambda s: s.get("score", 0)) if scores else {}
+        cand = Candidate(
+            session_id=session.id,
+            resume_id=f"expr-{session.id}-{i}",
+            filename=filename,
+            name=c.get("name") or "",
+            email="",
+            phone="",
+            score=best.get("score", 0.0),
+            band=best.get("band", ""),
+            experience_years=best.get("exp_years") or 0.0,
+            degrees=[],
+            job_titles=[],
+            matched_skills=best.get("matched", []),
+            missing_skills=best.get("missing", []),
+            preferred_matched=[],
+            components={},
+            explanation=[],
+            sections={},
+            meets_experience_requirement=False,
+            fairness_note="",
+            profile_json={
+                "id": c.get("id"),
+                "name": c.get("name") or "",
+                "category": c.get("category") or "",
+                "scores": scores,
+                "best_role": c.get("best_role"),
+                "best_score": c.get("best_score"),
+            },
+            status="Screened",
+            notes="",
+            reject_reason="",
+        )
+        db.add(cand)
+    db.commit()
+    return session.id
+
+
 @app.post("/api/screen/express")
 async def screen_express(
     dataset: UploadFile = File(...),
@@ -638,7 +705,7 @@ async def screen_express(
     Form fields: dataset (one CSV file), roles (JSON list of
     {title, required_skills:[str], min_experience_years}).
     Streams SSE: express_start → express_done (or express_error).
-    Not persisted to history — a rapid scan, not a deep screening session.
+    Persisted to screening history so Dashboard and History reflect the scan.
     """
     from .express import EXPRESS_MAX_ROWS, run_express
     try:
@@ -684,11 +751,11 @@ async def screen_express(
              for i, (disp, text, name, ext_id, cat) in enumerate(rows, start=1)]
 
     async def event_gen():
+        import asyncio
         yield _sse({"type": "express_start", "total": len(items),
                     "roles": [r["title"] for r in clean_roles],
                     "truncated": info["truncated"], "total_rows": info["total_rows"]})
         try:
-            import asyncio
             result = await asyncio.to_thread(
                 run_express,
                 [(it["ext_id"], it["name"], it["category"], it["text"]) for it in items],
@@ -702,6 +769,19 @@ async def screen_express(
                              "scored_rows": len(items),
                              "truncated": info["truncated"],
                              "text_column": info["text_column"]}
+        # Persist so Dashboard + History show this scan. Never fails the scan itself.
+        session_id = None
+        try:
+            db = get_session()
+            try:
+                session_id = await asyncio.to_thread(
+                    _persist_express_session, db, user.id, filename,
+                    clean_roles, result, result["dataset"])
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"[express] history persist failed: {e}")
+        result["session_id"] = session_id
         yield _sse({"type": "express_done", **result})
 
     return StreamingResponse(
@@ -785,6 +865,35 @@ def dashboard(user: User = Depends(get_current_user)):
         for c in candidates:
             if c.band in dist:
                 dist[c.band] += 1
+        latest = None
+        if sessions:
+            s0 = sessions[0]
+            latest = session_to_dict(s0)
+            if (s0.method or "deep") == "express":
+                snap = s0.job_snapshot or {}
+                roles = snap.get("roles") or []
+                top_picks = {}
+                for role in roles:
+                    best_c, best_sc = None, None
+                    for c in s0.candidates:
+                        prof = c.profile_json or {}
+                        for sc in (prof.get("scores") or []):
+                            if sc.get("role") == role and (
+                                    best_sc is None or sc.get("score", 0) > best_sc.get("score", 0)):
+                                best_c, best_sc = c, sc
+                    if best_sc:
+                        top_picks[role] = {
+                            "name": best_c.name or "",
+                            "category": (best_c.profile_json or {}).get("category", ""),
+                            "score": best_sc.get("score", 0),
+                            "band": best_sc.get("band", ""),
+                        }
+                latest["top_picks"] = top_picks
+            else:
+                latest["top_candidates"] = [
+                    {"name": c.name or c.filename, "score": c.score, "band": c.band}
+                    for c in sorted(s0.candidates, key=lambda c: c.score, reverse=True)[:3]
+                ]
         return {
             "stats": {
                 "total_resumes": sum(s.total_resumes for s in sessions),
@@ -792,6 +901,7 @@ def dashboard(user: User = Depends(get_current_user)):
                 "shortlisted": sum(1 for c in candidates if c.status == "Shortlisted"),
                 "avg_score": round(sum(scores) / len(scores), 4) if scores else 0.0,
             },
+            "latest": latest,
             "recent_sessions": [session_to_dict(s) for s in sessions[:8]],
             "score_distribution": [{"label": k, "count": v} for k, v in dist.items()],
         }
@@ -824,6 +934,24 @@ def get_session_detail(session_id: int, user: User = Depends(get_current_user)):
                        ScreeningSession.user_id == user.id).first())
         if s is None:
             raise HTTPException(status_code=404, detail="Session not found.")
+        if (s.method or "deep") == "express":
+            # Return the express result shape so the role-tab view can be rebuilt.
+            snap = s.job_snapshot or {}
+            cands = sorted(s.candidates, key=lambda c: c.score, reverse=True)
+            return {
+                "id": s.id,
+                "method": "express",
+                "session_id": s.id,
+                "job_title": s.job_title,
+                "job_company": s.job_company,
+                "created_at": s.created_at.isoformat() if s.created_at else "",
+                "total_resumes": s.total_resumes,
+                "roles": snap.get("roles") or [],
+                "elapsed_seconds": snap.get("elapsed_seconds"),
+                "method_note": snap.get("method_note", ""),
+                "dataset": snap.get("dataset") or {},
+                "candidates": [candidate_public(c) for c in cands],
+            }
         cands = sorted(s.candidates, key=lambda c: c.score, reverse=True)
         ranking = []
         for rank, c in enumerate(cands, start=1):

@@ -19,6 +19,71 @@ const BAND_COLORS = {
   'Weak match': 'var(--muted)',
 };
 
+function bandClass(band) {
+  if (band === 'Strong match') return 'band band-strong';
+  if (band === 'Worth reviewing') return 'band band-review';
+  return 'band band-weak';
+}
+
+function LatestAnalysis({ latest, onOpenSession }) {
+  if (!latest) return null;
+  const isExpress = latest.method === 'express';
+  const picks = latest.top_picks || {};
+  return (
+    <div className="dash-panel rise latest-card" style={{ '--d': '80ms' }}>
+      <div className="card-eyebrow">Latest analysis</div>
+      <h3 style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        {latest.job_title || 'Untitled'}
+        <span className={`method-badge${isExpress ? ' express' : ''}`}>
+          {isExpress ? 'Express dataset' : 'Deep pipeline'}
+        </span>
+        <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>{fmtDate(latest.created_at)}</span>
+      </h3>
+      <div className="express-stats" style={{ margin: '10px 0 14px' }}>
+        <div className="express-stat"><div className="v">{(latest.total_resumes || 0).toLocaleString()}</div><div className="k">Resumes scored</div></div>
+        {isExpress ? (
+          <>
+            <div className="express-stat"><div className="v">{(latest.roles || []).length}</div><div className="k">Job roles</div></div>
+            <div className="express-stat"><div className="v">{latest.elapsed_seconds != null ? `${latest.elapsed_seconds}s` : '—'}</div><div className="k">Processing time</div></div>
+          </>
+        ) : (
+          <>
+            <div className="express-stat"><div className="v">{Math.round((latest.avg_score || 0) * 100)}%</div><div className="k">Avg score</div></div>
+            <div className="express-stat"><div className="v">{latest.screened_count || 0}/{latest.total_resumes || 0}</div><div className="k">Screened</div></div>
+          </>
+        )}
+      </div>
+      {isExpress ? (
+        <div className="latest-picks">
+          {Object.entries(picks).map(([role, p]) => (
+            <div className="latest-pick" key={role}>
+              <span className="lp-role">{role}</span>
+              <span className="lp-name">{p.name}{p.category && <span className="cat-chip" style={{ marginLeft: 8 }}>{p.category}</span>}</span>
+              <span className="lp-score"><strong>{Math.round((p.score || 0) * 100)}%</strong> <span className={bandClass(p.band)}>{p.band}</span></span>
+            </div>
+          ))}
+          {Object.keys(picks).length === 0 && <div className="empty-note">No picks recorded for this scan.</div>}
+        </div>
+      ) : (
+        <div className="latest-picks">
+          {(latest.top_candidates || []).map((c, i) => (
+            <div className="latest-pick" key={i}>
+              <span className="lp-role">#{i + 1}</span>
+              <span className="lp-name">{c.name}</span>
+              <span className="lp-score"><strong>{Math.round((c.score || 0) * 100)}%</strong> <span className={bandClass(c.band)}>{c.band}</span></span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 12 }}>
+        <Button type="button" className="btn-ghost btn-sm" onClick={() => onOpenSession(latest.id)}>
+          Open full results →
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // Real, configured scoring weights — shown, not computed.
 const WEIGHTS = [
   { key: 'skills', label: 'SKILLS', pct: 50, detail: 'taxonomy match × 0.50' },
@@ -43,6 +108,7 @@ export default function Dashboard({ data, loading = false, error = '', onNewScre
   const stats = (data && data.stats) || {};
   const recent = (data && data.recent_sessions) || [];
   const dist = (data && data.score_distribution) || [];
+  const latest = (data && data.latest) || null;
   const stages = Object.entries(STAGE_LABELS);
 
   const telemetry = [
@@ -98,6 +164,8 @@ export default function Dashboard({ data, loading = false, error = '', onNewScre
             </div>
           ))}
       </div>
+
+      {!loading && !error && <LatestAnalysis latest={latest} onOpenSession={onOpenSession} />}
 
       <div className="dash-cols">
         <div className="dash-panel rise" style={{ '--d': '140ms' }}>
@@ -165,8 +233,8 @@ export default function Dashboard({ data, loading = false, error = '', onNewScre
               <li key={s.id}>
                 <Button type="button" className="log-row" onClick={() => onOpenSession(s.id)}>
                   <span className="mono log-id">{shortId(s.id)}</span>
-                  <span className="log-main"><strong>{s.job_title || 'Untitled role'}</strong>{s.job_company && <span className="muted"> · {s.job_company}</span>}</span>
-                  <span className="mono log-meta">{s.screened_count}/{s.total_resumes} screened</span>
+                  <span className="log-main"><strong>{s.job_title || 'Untitled role'}</strong>{s.method === 'express' && <span className="method-badge express" style={{ marginLeft: 8 }}>Express</span>}{s.job_company && <span className="muted"> · {s.job_company}</span>}</span>
+                  <span className="mono log-meta">{s.method === 'express' ? `${(s.total_resumes || 0).toLocaleString()} × ${(s.roles || []).length} roles` : `${s.screened_count}/${s.total_resumes} screened`}</span>
                   <span className="mono log-meta">avg {Math.round((s.avg_score || 0) * 100)}%</span>
                   <span className="log-date">{fmtDate(s.created_at)}</span>
                 </Button>
