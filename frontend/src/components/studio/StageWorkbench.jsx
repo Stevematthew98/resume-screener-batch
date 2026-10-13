@@ -4,7 +4,8 @@ import { Check, ChevronDown, Copy } from 'lucide-react';
 const TABS = ['Overview', 'Input / Output', 'Python Code', 'Technical Details'];
 
 // During the guided walk each tab is toured one by one for every stage.
-export const TAB_CYCLE_MS = 1500;
+// 1s per tab → 4s per stage → the full 20-stage walk fits in ~80 seconds.
+export const TAB_CYCLE_MS = 1000;
 export const TAB_COUNT = TABS.length;
 
 function fmtDur(ms) {

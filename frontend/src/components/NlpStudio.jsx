@@ -66,7 +66,7 @@ export default function NlpStudio({
     if (batchComplete && batchDoneAt.current == null) batchDoneAt.current = Date.now();
   }, [batchComplete]);
 
-  // Guided replay: walk the RECORDED stages, touring every workbench tab per stage (≈2 min total).
+  // Guided replay: walk the RECORDED stages, touring every workbench tab per stage (≈80s total).
   // All data shown is from this run's real outputs — clearly labeled as replay.
   useEffect(() => {
     if (replayN == null) return;
@@ -118,9 +118,10 @@ export default function NlpStudio({
   }
 
   // Guided walk director: one stage at a time, touring every workbench tab
-  // (Overview → Input / Output → Python Code → Technical Details, ≈6s per stage,
-  // ≈2 min total). A stage is only marked done once its REAL backend output is
-  // recorded — if the backend is slower than the walk, we wait honestly instead of faking.
+  // (Overview → Input / Output → Python Code → Technical Details, ≈4s per stage,
+  // ≈80s total — inside the 90-second budget). A stage is only marked done once
+  // its REAL backend output is recorded — if the backend is slower than the walk,
+  // we wait honestly instead of faking.
   //
   // Timing design (two hard-won lessons):
   //  - `now` ticks every second, and every SSE event gives `selected` a new
@@ -299,7 +300,7 @@ export default function NlpStudio({
           <div className="studio-done-actions">
             <Button type="button" className="btn-primary btn-sm" onClick={goToResults}>View Candidate Analysis</Button>
             <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); }}>Explore NLP Results</Button>
-            <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); setReplayN(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Replay pipeline (≈2 min)</Button>
+            <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); setReplayN(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Replay pipeline (≈80 sec)</Button>
             <Button type="button" className="btn-ghost btn-sm" onClick={goToResults}>Return to Candidate Rankings</Button>
           </div>
         </section>
