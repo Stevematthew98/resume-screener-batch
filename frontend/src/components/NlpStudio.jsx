@@ -138,8 +138,14 @@ export default function NlpStudio({
   //    checks progress, and the per-stage 3s viewing window lives in a ref
   //    that only resets when the walk actually moves to the next stage.
   const walkStageStart = useRef(null);
+  const prevWalkN = useRef(null); // to detect the final 20 → null transition
   useEffect(() => {
     walkStageStart.current = null;
+    // The walk advances 1→20, then 20→null directly (it must NEVER render as
+    // 21 — see the crash note in the interval below). Detect that final
+    // transition as walk completion.
+    if (prevWalkN.current === 20 && walkN == null) walkEnded.current = true;
+    prevWalkN.current = walkN;
     if (walkN != null && walkN > 20) { setWalkN(null); walkEnded.current = true; } // walk finished → open results instantly
   }, [walkN]);
   useEffect(() => {

@@ -291,8 +291,8 @@ export default function App() {
           }).catch(() => {});
           refreshDashboard().catch(() => {});
           refreshSessions().catch(() => {});
-          // Stay on the studio: the completion summary offers
-          // View Candidate Analysis / Explore NLP Results / replay actions.
+          // Stay on the studio: the walk opens the ranking automatically
+          // the instant it finishes (see NlpStudio's walk-completion nav).
         }
       }, { jobId });
     } catch (e) {
