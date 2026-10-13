@@ -30,6 +30,15 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 
+# Railway's free tier throttles CPU hard; torch's default is to fan out across
+# every visible core, which thrashes on a throttled vCPU and made MiniLM
+# encoding take ~26s per resume. A single thread is far faster here, with
+# byte-identical embeddings (same math, no thread-level nondeterminism).
+import torch
+
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+
 # ----------------------------------------------------------------------------
 # Lazy singletons (loaded once per process; pre-downloaded into the image
 # during the Railway build so startup stays fast)
