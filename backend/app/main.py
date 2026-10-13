@@ -583,18 +583,22 @@ async def screen_stream(
             queue: asyncio.Queue = asyncio.Queue()
             _DONE = object()
 
+            def _put(item):
+                # Fire-and-forget: never block the worker on the event loop.
+                # (Waiting on the put future here deadlocked against the
+                # worker.join() below — 60s stall between resumes.)
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+
             def _run_one():
                 try:
                     for k, p in screen_one_resume(
                             data, filename, job_spec, resume_id, personalization,
                             pre_extracted_text=pre_text, candidate_name=cand_name):
-                        asyncio.run_coroutine_threadsafe(queue.put((k, p)), loop).result()
+                        _put((k, p))
                 except Exception:
-                    asyncio.run_coroutine_threadsafe(
-                        queue.put(("error", {"message": "Could not analyse this file."})),
-                        loop).result()
+                    _put(("error", {"message": "Could not analyse this file."}))
                 finally:
-                    asyncio.run_coroutine_threadsafe(queue.put((_DONE, None)), loop).result()
+                    _put((_DONE, None))
 
             worker = threading.Thread(target=_run_one, daemon=True)
             worker.start()
