@@ -320,6 +320,118 @@ function CandidateDetail({ candidate, statusInfo, onClose, onStatus, readOnly = 
 /**
  * Ranking table: sortable by score, filterable by skill/experience, searchable by name.
  */
+/* --- Batch analysis: aggregate + per-applicant breakdown for ALL applicants --- */
+function BatchAnalysis({ ranking, candidates }) {
+  const rows = (ranking || []).map((r) => ({ ...r, full: (candidates || {})[r.resume_id] || null }));
+  if (!rows.length) return null;
+
+  const bandDefs = [
+    { key: 'Strong match', cls: 'band-strong', color: '#16A579' },
+    { key: 'Worth reviewing', cls: 'band-review', color: '#E9A23B' },
+    { key: 'Weak match', cls: 'band-weak', color: '#98A2B3' },
+  ];
+  const bandCount = (k) => rows.filter((r) => r.band === k).length;
+
+  const missCount = {};
+  rows.forEach((r) => (r.missing_skills || []).forEach((s) => { missCount[s] = (missCount[s] || 0) + 1; }));
+  const topMissing = Object.entries(missCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  const compOrder = ['skills', 'jd_similarity', 'experience', 'education'];
+  const compColor = { skills: '#536DFE', jd_similarity: '#8B7CFF', experience: '#2FBF9B', education: '#E9A23B' };
+  const bandClsFor = (b) => (b === 'Strong match' ? 'band-strong' : b === 'Worth reviewing' ? 'band-review' : 'band-weak');
+  const chipList = (skills, cls, empty) => {
+    const list = skills || [];
+    if (!list.length) return <span className="hint">{empty}</span>;
+    const shown = list.slice(0, 6);
+    return (
+      <>
+        {shown.map((s) => <span key={s} className={`chip ${cls}`}>{s}</span>)}
+        {list.length > 6 && <span className="chip">+{list.length - 6} more</span>}
+      </>
+    );
+  };
+
+  return (
+    <section className="card rise" style={{ '--d': '40ms' }} aria-label="Batch analysis of all applicants">
+      <div className="card-eyebrow">Batch analysis · all {rows.length} applicant{rows.length !== 1 ? 's' : ''}</div>
+
+      <div className="ba-dist">
+        {bandDefs.map((b) => (
+          <div key={b.key} className="ba-dist-item">
+            <span className={`band-chip ${b.cls}`}>{b.key}</span>
+            <strong className="mono">{bandCount(b.key)}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="ba-dist-bar" aria-hidden="true">
+        {bandDefs.map((b) => (
+          <span key={b.key} style={{ width: `${(bandCount(b.key) / rows.length) * 100}%`, background: b.color }} />
+        ))}
+      </div>
+
+      {topMissing.length > 0 && (
+        <>
+          <div className="chip-group-label">What this batch is missing</div>
+          <div className="ba-missing">
+            {topMissing.map(([skill, n]) => (
+              <div key={skill} className="ba-miss-row">
+                <span className="mono ba-miss-skill">{skill}</span>
+                <div className="scorebar"><div className="scorebar-fill" style={{ width: `${(n / rows.length) * 100}%`, background: '#E9A23B' }} /></div>
+                <span className="mono ba-miss-pct">{Math.round((n / rows.length) * 100)}%</span>
+              </div>
+            ))}
+          </div>
+          <p className="hint" style={{ margin: '6px 0 0' }}>Share of applicants where each required skill was not detected in the resume text — not proof the skill is absent.</p>
+        </>
+      )}
+
+      <div className="chip-group-label">Per-applicant analysis</div>
+      <div className="ba-grid">
+        {rows.map((r) => {
+          const comps = r.full && r.full.components
+            ? compOrder.map((k) => ({ key: k, ...(r.full.components[k] || null) })).filter((c) => c && c.label)
+            : [];
+          const pct = Math.round((r.score || 0) * 100);
+          const name = r.name || r.filename || 'Applicant';
+          return (
+            <article key={r.resume_id} className="ba-card">
+              <div className="ba-head">
+                <span className="ba-rank mono">#{r.rank}</span>
+                <div className="ba-id">
+                  <div className="ba-name">{name}</div>
+                  <div className="ba-sub mono">{r.experience_years ?? '–'} yrs exp · {(r.matched_skills || []).length} skills matched</div>
+                </div>
+                <span className={`band-chip ${bandClsFor(r.band)}`}>{r.band}</span>
+                <strong className="score-pct mono">{pct}%</strong>
+              </div>
+              {comps.length > 0 && (
+                <div className="ba-comps">
+                  {comps.map((c) => (
+                    <div key={c.label} className="ba-comp">
+                      <span className="ba-comp-label">{c.label}</span>
+                      <div className="scorebar">
+                        <div className="scorebar-fill" style={{ width: `${Math.min(100, Math.max(0, (c.value || 0) * 100))}%`, background: compColor[c.key] || '#536DFE' }} />
+                      </div>
+                      <span className="mono ba-comp-pts">{c.points} pts</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="ba-skills">
+                <div className="chips">{chipList(r.matched_skills, 'chip-green', 'No skills matched.')}</div>
+                {(r.missing_skills || []).length > 0 && (
+                  <div className="chips">{chipList(r.missing_skills, 'chip-amber', '')}</div>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      <p className="hint" style={{ margin: '10px 0 0' }}>Rankings assist — you decide. Human review is mandatory before any shortlisting.</p>
+    </section>
+  );
+}
+
 export default function RankingView({ job, ranking, candidates, statuses, onSelectCandidate, onStatusChange, onRestart, sessionId = null, readOnly = false, onExport = null, onBack = null, summary = null, onReplay = null }) {
   const [query, setQuery] = useState('');
   const [skillFilter, setSkillFilter] = useState('');
@@ -416,6 +528,8 @@ export default function RankingView({ job, ranking, candidates, statuses, onSele
           )}
         </div>
       </section>
+
+      <BatchAnalysis ranking={ranking} candidates={candidates} />
 
       {rows.length === 0 ? (
         <section className="card"><p className="muted">No candidates match these filters.</p></section>

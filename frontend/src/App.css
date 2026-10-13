@@ -541,6 +541,30 @@ textarea { resize: vertical; min-height: 90px; }
   font-size: 13px; color: var(--muted);
 }
 
+/* --- Batch analysis (all applicants) ------------------------------------- */
+.ba-dist { display: flex; gap: 22px; flex-wrap: wrap; margin: 14px 0 10px; }
+.ba-dist-item { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.ba-dist-bar { display: flex; height: 10px; border-radius: 99px; overflow: hidden; background: #E8EBF1; margin-bottom: 4px; }
+.ba-dist-bar span { display: block; height: 100%; }
+.ba-missing { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; max-width: 640px; }
+.ba-miss-row { display: flex; align-items: center; gap: 12px; }
+.ba-miss-skill { font-size: 13px; min-width: 170px; }
+.ba-miss-row .scorebar { flex: 1; }
+.ba-miss-pct { font-size: 13px; min-width: 44px; text-align: right; color: var(--muted); }
+.ba-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-top: 10px; }
+.ba-card { border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; background: #fff; }
+.ba-head { display: flex; align-items: center; gap: 10px; }
+.ba-rank { font-size: 13px; font-weight: 700; color: var(--text-3); min-width: 30px; }
+.ba-id { flex: 1; min-width: 0; }
+.ba-name { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ba-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.ba-comps { display: flex; flex-direction: column; gap: 7px; margin: 12px 0 4px; }
+.ba-comp { display: grid; grid-template-columns: 130px 1fr 52px; align-items: center; gap: 10px; }
+.ba-comp-label { font-size: 12.5px; color: var(--text-2); }
+.ba-comp-pts { font-size: 12px; text-align: right; color: var(--muted); }
+.ba-skills .chips { margin: 8px 0 0; }
+.ba-skills .chip { font-size: 11.5px; padding: 3px 10px; }
+
 /* --- Score ring ---------------------------------------------------------- */
 .ring-wrap { position: relative; flex-shrink: 0; }
 .ring-label {
