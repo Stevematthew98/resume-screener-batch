@@ -6,11 +6,13 @@ CSV/Excel/PDF exports. The NLP pipeline itself (pipeline.py / screening.py)
 is untouched — Phase 2 wraps it with persistence and management.
 """
 
+import asyncio
 import csv
 import io
 import json
 import os
 import re
+import threading
 import uuid
 from typing import Any, Optional
 
@@ -567,15 +569,40 @@ async def screen_stream(
                     "notes": csv_notes})
         ranking: list[dict] = []
         screened = 0
+        loop = asyncio.get_running_loop()
         for idx, (filename, data, pre_text, cand_name) in enumerate(items):
             resume_id = uuid.uuid4().hex
             yield _sse({"type": "resume_start", "resume_id": resume_id,
                         "filename": filename, "index": idx, "total": total})
+            # The NLP pipeline (spaCy, MiniLM, PDF parsing) is CPU-bound and
+            # fully synchronous. Running it on the event loop froze the entire
+            # API (health/auth/dashboard) for the whole batch, so each resume
+            # is processed in a worker thread while its stage events stream
+            # back through a queue — the event loop stays responsive and other
+            # requests keep working mid-batch. Scoring logic is untouched.
+            queue: asyncio.Queue = asyncio.Queue()
+            _DONE = object()
+
+            def _run_one():
+                try:
+                    for k, p in screen_one_resume(
+                            data, filename, job_spec, resume_id, personalization,
+                            pre_extracted_text=pre_text, candidate_name=cand_name):
+                        asyncio.run_coroutine_threadsafe(queue.put((k, p)), loop).result()
+                except Exception:
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put(("error", {"message": "Could not analyse this file."})),
+                        loop).result()
+                finally:
+                    asyncio.run_coroutine_threadsafe(queue.put((_DONE, None)), loop).result()
+
+            worker = threading.Thread(target=_run_one, daemon=True)
+            worker.start()
             try:
-                for kind, payload in screen_one_resume(data, filename, job_spec,
-                                                       resume_id, personalization,
-                                                       pre_extracted_text=pre_text,
-                                                       candidate_name=cand_name):
+                while True:
+                    kind, payload = await queue.get()
+                    if kind is _DONE:
+                        break
                     if kind == "stage":
                         yield _sse({"type": "stage", "resume_id": resume_id,
                                     "filename": filename, "index": idx, "total": total,
@@ -598,10 +625,8 @@ async def screen_stream(
                         yield _sse({"type": "resume_done", "resume_id": resume_id,
                                     "filename": filename, "index": idx, "total": total,
                                     "candidate": payload})
-            except Exception:  # one bad file must not kill the batch
-                yield _sse({"type": "resume_error", "resume_id": resume_id,
-                            "filename": filename, "index": idx, "total": total,
-                            "message": "Could not analyse this file."})
+            finally:
+                worker.join(timeout=60)
         ranking.sort(key=lambda r: r["score"], reverse=True)
         for rank, row in enumerate(ranking, start=1):
             row["rank"] = rank
