@@ -30,17 +30,16 @@ function fmtClock(ms) {
 export default function NlpStudio({
   total, doneCount, currentFile, resumes, candidates, ranking,
   job, error, startedAt, batchComplete, onViewRanking,
+  startReplay = false, onReplayConsumed = null,
 }) {
   const [selResumeKey, setSelResumeKey] = useState(null);
   const [pinnedStage, setPinnedStage] = useState(null);
-  const [showSummary, setShowSummary] = useState(true);
   const [replayN, setReplayN] = useState(null); // null = not replaying; else stage number 1..20
   const [walkN, setWalkN] = useState(null); // paced guided walk: 1..20 while the live run is presented stage-by-stage
-  const [autoNav, setAutoNav] = useState(false); // countdown to auto-open the final result
-  const [autoNavSecs, setAutoNavSecs] = useState(5);
   const [now, setNow] = useState(Date.now());
   const batchDoneAt = useRef(null); // captured once when the batch completes
-  const autoNavDone = useRef(false); // auto-open fires once per run
+  const navDone = useRef(false); // instant open of results fires once per run
+  const walkEnded = useRef(false); // true once the live walk ran to completion in this mount
   const viewRankingRef = useRef(onViewRanking);
   viewRankingRef.current = onViewRanking;
 
@@ -50,16 +49,25 @@ export default function NlpStudio({
   }, []);
 
   // New run → reset studio UI state and start the guided walk at stage 1.
+  // When remounting for a pipeline replay (startReplay), skip the live walk
+  // and start the replay tour directly from the recorded outputs.
   useEffect(() => {
+    if (startReplay) {
+      setWalkN(null);
+      setReplayN(1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (onReplayConsumed) onReplayConsumed();
+      return;
+    }
     setReplayN(null);
     setPinnedStage(null);
     setSelResumeKey(null);
-    setShowSummary(true);
     setWalkN(1);
-    setAutoNav(false);
     batchDoneAt.current = null;
-    autoNavDone.current = false;
-  }, [startedAt]);
+    navDone.current = false;
+    walkEnded.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startedAt, startReplay]);
 
   // Capture the batch completion timestamp once (not the ticking clock).
   useEffect(() => {
@@ -132,7 +140,7 @@ export default function NlpStudio({
   const walkStageStart = useRef(null);
   useEffect(() => {
     walkStageStart.current = null;
-    if (walkN != null && walkN > 20) setWalkN(null); // walk finished → hand over to summary
+    if (walkN != null && walkN > 20) { setWalkN(null); walkEnded.current = true; } // walk finished → open results instantly
   }, [walkN]);
   useEffect(() => {
     const t = setInterval(() => {
@@ -223,34 +231,16 @@ export default function NlpStudio({
     };
   })();
 
-  // After the walk finishes, open the final result automatically:
-  // arm a 5s countdown once the completion summary appears. Exploring the
-  // NLP results or replaying cancels it; the analysis buttons go immediately.
-  function cancelAutoNav() {
-    autoNavDone.current = true;
-    setAutoNav(false);
-  }
-  function goToResults() {
-    cancelAutoNav();
-    viewRankingRef.current();
-  }
-  const summaryVisible = batchComplete && walkN == null && showSummary && !!summaryStats;
+  // The moment the walk finishes, open the final result instantly — no waiting,
+  // no countdown. Fires only when the live walk actually ran to completion in
+  // this mount (walkEnded), so a remount for replay never bounces away.
   useEffect(() => {
-    if (summaryVisible && !autoNavDone.current && !autoNav) {
-      setAutoNavSecs(5);
-      setAutoNav(true);
+    if (batchComplete && walkN == null && walkEnded.current && !navDone.current && replayN == null && summaryStats) {
+      navDone.current = true;
+      viewRankingRef.current(summaryStats);
     }
-  }, [summaryVisible, autoNav]);
-  useEffect(() => {
-    if (!autoNav) return;
-    if (autoNavSecs <= 0) {
-      goToResults();
-      return;
-    }
-    const t = setTimeout(() => setAutoNavSecs((s) => s - 1), 1000);
-    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoNav, autoNavSecs]);
+  }, [batchComplete, walkN, replayN, summaryStats]);
 
   return (
     <div className="studio">
@@ -278,33 +268,6 @@ export default function NlpStudio({
         </div>
         {error && <div className="alert" role="alert">{error}</div>}
       </section>
-
-      {/* ---------- completion summary (after the guided walk finishes) ---------- */}
-      {summaryVisible && (
-        <section className="card rise studio-done" style={{ '--d': '60ms' }}>
-          <div className="card-eyebrow">Complete</div>
-          <h2>NLP Analysis Complete</h2>
-          <div className="viz-tiles">
-            <div className="viz-tile"><div className="viz-tile-k">RESUMES PROCESSED</div><div className="viz-tile-v mono">{summaryStats.resumes}</div></div>
-            <div className="viz-tile"><div className="viz-tile-k">AVG MATCH SCORE</div><div className="viz-tile-v mono">{summaryStats.avg}%</div></div>
-            <div className="viz-tile"><div className="viz-tile-k">STRONG MATCHES</div><div className="viz-tile-v mono">{summaryStats.strong}</div></div>
-            <div className="viz-tile"><div className="viz-tile-k">ELAPSED</div><div className="viz-tile-v mono">{fmtClock(summaryStats.elapsed)}</div></div>
-            <div className="viz-tile"><div className="viz-tile-k">WARNINGS</div><div className="viz-tile-v mono">{summaryStats.warnings}</div></div>
-          </div>
-          {autoNav && (
-            <p className="hint" role="status" style={{ margin: '10px 0 0' }}>
-              Opening the final result in <strong className="mono">{autoNavSecs}s</strong>…
-              Stay here to explore the NLP results or replay the pipeline.
-            </p>
-          )}
-          <div className="studio-done-actions">
-            <Button type="button" className="btn-primary btn-sm" onClick={goToResults}>View Candidate Analysis</Button>
-            <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); }}>Explore NLP Results</Button>
-            <Button type="button" className="btn-ghost btn-sm" onClick={() => { cancelAutoNav(); setShowSummary(false); setReplayN(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Replay pipeline (≈80 sec)</Button>
-            <Button type="button" className="btn-ghost btn-sm" onClick={goToResults}>Return to Candidate Rankings</Button>
-          </div>
-        </section>
-      )}
 
       {/* ---------- replay banner ---------- */}
       {replayN != null && (

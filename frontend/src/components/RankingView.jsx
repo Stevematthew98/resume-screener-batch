@@ -320,7 +320,7 @@ function CandidateDetail({ candidate, statusInfo, onClose, onStatus, readOnly = 
 /**
  * Ranking table: sortable by score, filterable by skill/experience, searchable by name.
  */
-export default function RankingView({ job, ranking, candidates, statuses, onSelectCandidate, onStatusChange, onRestart, sessionId = null, readOnly = false, onExport = null, onBack = null }) {
+export default function RankingView({ job, ranking, candidates, statuses, onSelectCandidate, onStatusChange, onRestart, sessionId = null, readOnly = false, onExport = null, onBack = null, summary = null, onReplay = null }) {
   const [query, setQuery] = useState('');
   const [skillFilter, setSkillFilter] = useState('');
   const [minExpFilter, setMinExpFilter] = useState('');
@@ -377,6 +377,19 @@ export default function RankingView({ job, ranking, candidates, statuses, onSele
           <p className="ranker-pill" title={ranker.note}>
             ✨ Scores tuned from your last {ranker.decisions} decisions
           </p>
+        )}
+        {summary && (
+          <div className="summary-strip" aria-label="Analysis summary">
+            <span className="mono">{summary.resumes} resumes</span>
+            <span className="mono">avg {summary.avg}%</span>
+            <span className="mono">{summary.strong} strong</span>
+            <span className="mono">{summary.warnings} warnings</span>
+            {onReplay && (
+              <Button type="button" className="btn-ghost btn-sm" onClick={onReplay} style={{ marginLeft: 'auto' }}>
+                Replay pipeline (≈80 sec)
+              </Button>
+            )}
+          </div>
         )}
         <div className="toolbar">
           <input className="toolbar-input" type="text" value={query}

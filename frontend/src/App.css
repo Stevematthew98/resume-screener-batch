@@ -533,6 +533,14 @@ textarea { resize: vertical; min-height: 90px; }
   padding: 8px 14px; border-radius: 999px;
 }
 
+/* --- Run summary strip (instant results banner) -------------------------- */
+.summary-strip {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  margin-top: 12px; padding: 10px 16px; border-radius: 12px;
+  background: #F3F5F8; border: 1px solid var(--border);
+  font-size: 13px; color: var(--muted);
+}
+
 /* --- Score ring ---------------------------------------------------------- */
 .ring-wrap { position: relative; flex-shrink: 0; }
 .ring-label {

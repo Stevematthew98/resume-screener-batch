@@ -87,6 +87,8 @@ export default function App() {
   const [statuses, setStatuses] = useState({});
   const [selectedId, setSelectedId] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [runSummary, setRunSummary] = useState(null); // stats from the just-finished walk, shown on the ranking view
+  const [startReplay, setStartReplay] = useState(false); // remount studio to replay the recorded pipeline
 
   const [jobs, setJobs] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -368,6 +370,8 @@ export default function App() {
     setStatuses({});
     setSelectedId(null);
     setSessionId(null);
+    setRunSummary(null);
+    setStartReplay(false);
     setError('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -461,13 +465,15 @@ export default function App() {
         <NlpStudio total={total} doneCount={doneCount} currentFile={currentFile}
           resumes={pipes} candidates={candidates} ranking={ranking} job={job}
           error={screenError} startedAt={screeningStartedAt} batchComplete={batchComplete}
-          onViewRanking={() => { setView('ranking'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+          startReplay={startReplay} onReplayConsumed={() => setStartReplay(false)}
+          onViewRanking={(stats) => { setRunSummary(stats || null); setView('ranking'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
       )}
 
       {view === 'ranking' && (
         <RankingView job={job} ranking={ranking} candidates={candidates} statuses={statuses}
           onSelectCandidate={setSelectedId} onStatusChange={handleStatusChange} onRestart={restart}
-          sessionId={sessionId} onExport={handleExport} />
+          sessionId={sessionId} onExport={handleExport}
+          summary={runSummary} onReplay={runSummary ? () => { setStartReplay(true); setView('screening'); } : null} />
       )}
 
       {isHistoryDetail && historyDetail && (
